@@ -8,8 +8,8 @@ from .sampler import Sampler
 
 
 class AbsorbingDiffusion(Sampler):
-    def __init__(self, H, denoise_fn, mask_id, embedding_weight, aux_weight=0.01):
-        super().__init__(H, embedding_weight=embedding_weight)
+    def __init__(self, H, denoise_fn, mask_id, aux_weight=0.01):
+        super().__init__(H)
 
         self.num_classes = H.codebook_size
         self.latent_emb_dim = H.emb_dim
@@ -17,7 +17,7 @@ class AbsorbingDiffusion(Sampler):
         self.num_timesteps = H.total_steps
 
         self._denoise_fn = denoise_fn
-        self.n_samples = H.batch_size
+        self.n_samples = H.n_samples
         self.loss_type = H.loss_type
         self.mask_schedule = H.mask_schedule
         self.aux_weight = aux_weight
@@ -136,10 +136,13 @@ class AbsorbingDiffusion(Sampler):
 
         return loss.mean(), vb_loss.mean()
 
-    def sample(self, temp=1.0, sample_steps=None):
+    def sample(self, x_T=None, temp=1.0, sample_steps=None, unmasked=None):
         b, device = self.n_samples, 'cuda'
-        x_t = torch.ones((b, *self.shape), device=device).long() * self.mask_id
-        unmasked = torch.zeros_like(x_t, device=device).bool()
+        x_t = x_T if x_T is not None else torch.ones((b, *self.shape), device=device).long() * self.mask_id
+
+        if unmasked is None:
+            unmasked = torch.zeros_like(x_t, device=device).bool()
+
         sample_steps = list(range(1, sample_steps+1))
 
         for t in reversed(sample_steps):

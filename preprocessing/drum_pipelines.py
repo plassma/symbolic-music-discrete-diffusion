@@ -14,7 +14,7 @@
 
 """Data processing pipelines for drum tracks."""
 
-import statistics
+from . import statistics
 from note_seq import drums_lib
 from note_seq import DrumTrack
 from note_seq import events_lib

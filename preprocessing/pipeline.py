@@ -22,7 +22,7 @@ import abc
 import inspect
 import os.path
 
-import statistics
+from . import statistics
 import six
 
 

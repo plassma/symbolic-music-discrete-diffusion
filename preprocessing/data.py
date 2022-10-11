@@ -20,8 +20,8 @@ import functools
 import itertools
 import logging
 
-import drum_pipelines
-import melody_pipelines
+from . import drum_pipelines
+from . import melody_pipelines
 import note_seq
 from note_seq import chords_lib
 from note_seq import drums_encoder_decoder

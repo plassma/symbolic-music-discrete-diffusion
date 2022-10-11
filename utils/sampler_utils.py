@@ -6,40 +6,40 @@ from models import Transformer, AbsorbingDiffusion
 from torch.nn import DataParallel
 
 
-def get_sampler(H, embedding_weight):
+def get_sampler(H):
 
     if H.sampler == 'absorbing':
         denoise_fn = Transformer(H).cuda()
         denoise_fn = DataParallel(denoise_fn).cuda()
         sampler = AbsorbingDiffusion(
-            H, denoise_fn, H.codebook_size, embedding_weight)
+            H, denoise_fn, H.codebook_size)
 
     return sampler
 
 
 @torch.no_grad()
-def get_samples(H, sampler):
+def get_samples(H, sampler, x_T=None, unmasked=None):
 
     if H.sampler == "absorbing":
         if H.sample_type == "diffusion":
-            latents = sampler.sample(sample_steps=H.sample_steps, temp=H.temp)
+            latents = sampler.sample(x_T=x_T, sample_steps=H.sample_steps, temp=H.temp, unmasked=unmasked)
         else:
             latents = sampler.sample_mlm(temp=H.temp, sample_steps=H.sample_steps)
 
     elif H.sampler == "autoregressive":
-        latents = sampler.sample(H.temp)
+        latents = sampler.sample()
 
     return latents.cpu().numpy()
 
 def get_samples_direct(H, sampler):
     if H.sampler == "absorbing" or H.sampler == "absorbing_MNIST":
         if H.sample_type == "diffusion":
-            latents = sampler.sample(sample_steps=H.sample_steps, temp=H.temp)
+            latents = sampler.sample()
         else:
             latents = sampler.sample_mlm(temp=H.temp, sample_steps=H.sample_steps)
 
     elif H.sampler == "autoregressive":
-        latents = sampler.sample(H.temp)
+        latents = sampler.sample()
     latents = latents.view(-1, 1, 28, 28) / 256
     return latents
 
@@ -97,12 +97,12 @@ def get_latent_loaders(H, get_validation_loader=True, shuffle=True):
 
     train_latents_fp = f"latents/{H.dataset}_{H.latent_shape[-1]}_train_latents{latents_fp_suffix}"
     train_latent_ids = torch.load(train_latents_fp)
-    train_latent_loader = torch.utils.data.DataLoader(train_latent_ids, batch_size=H.batch_size, shuffle=shuffle)
+    train_latent_loader = torch.utils.data.DataLoader(train_latent_ids, batch_size=H.n_samples, shuffle=shuffle)
 
     if get_validation_loader:
         val_latents_fp = f"latents/{H.dataset}_{H.latent_shape[-1]}_val_latents{latents_fp_suffix}"
         val_latent_ids = torch.load(val_latents_fp)
-        val_latent_loader = torch.utils.data.DataLoader(val_latent_ids, batch_size=H.batch_size, shuffle=shuffle)
+        val_latent_loader = torch.utils.data.DataLoader(val_latent_ids, batch_size=H.n_samples, shuffle=shuffle)
     else:
         val_latent_loader = None
 

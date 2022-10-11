@@ -104,8 +104,8 @@ class Transformer(nn.Module):
             self.vocab_size = H.codebook_size
 
         self.tok_emb = nn.ModuleList([nn.Embedding(vs, self.n_embd) for vs in self.vocab_size])
-        self.pos_emb = nn.Parameter(
-            torch.zeros(1, self.block_size, self.n_embd))
+        self.emb_red = nn.Linear(1536,512)
+        self.pos_emb = nn.Parameter(torch.zeros(1, self.block_size, self.n_embd))
         self.start_tok = nn.Parameter(torch.zeros(1, 1, self.n_embd))
         self.drop = nn.Dropout(H.embd_pdrop)
 
@@ -130,8 +130,8 @@ class Transformer(nn.Module):
     def forward(self, idx, t=None):
         # each index maps to a (learnable) vector
         token_embeddings = [t(idx[:, :, i]) for i, t in enumerate(self.tok_emb)]
-        token_embeddings = torch.stack(token_embeddings).sum(0)# todo: try other combinations of embeddings (concat?)
-
+        token_embeddings = torch.cat(token_embeddings,-1)# todo: try other combinations of embeddings (concat?)
+        token_embeddings = self.emb_red(token_embeddings)
         if self.causal:
             token_embeddings = torch.cat(
                 (self.start_tok.repeat(token_embeddings.size(0), 1, 1), token_embeddings),

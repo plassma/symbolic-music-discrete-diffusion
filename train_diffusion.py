@@ -49,9 +49,7 @@ def main(H, vis):
     log_start_step = 0
     eval_start_step = 0
 
-
-    embedding_weight = torch.zeros(0).cuda() #todo: don't need the embedding weight - use or cut out?
-    sampler = get_sampler(H, embedding_weight).cuda()
+    sampler = get_sampler(H).cuda()
 
     optim = torch.optim.Adam(sampler.parameters(), lr=H.lr)
 

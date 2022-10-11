@@ -1,2 +1,1 @@
-from .data import TrioConverter
-
+from .data import TrioConverter, OneHotMelodyConverter

@@ -39,8 +39,8 @@ class HparamsAbsorbing(HparamsBase):
 
         super().__init__(dataset)
         if self.dataset == "Lakh":
-            self.batch_size = 24
-            self.bert_n_emb = 512  # todo: try concat
+            self.n_samples = 24
+            self.bert_n_emb = 512  # todo: try concat embedding instead of summing over them
             self.bert_n_head = 8
             self.bert_n_layers = 24
             self.block_size = 256
