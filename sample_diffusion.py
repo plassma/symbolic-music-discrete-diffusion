@@ -20,7 +20,7 @@ def synth_samples(samples):
 
 
 def prep_theme(path="mario_theme.mid"):
-    converter = OneHotMelodyConverter(slice_bars=32)
+    converter = OneHotMelodyConverter(slice_bars=25)
     ns = midi_to_note_sequence(open(path, 'rb').read())
     tensors = list(converter.to_tensors(ns).outputs)
     tensors = [t.squeeze() for t in tensors]
