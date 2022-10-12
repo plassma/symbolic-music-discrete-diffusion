@@ -136,7 +136,12 @@ class AbsorbingDiffusion(Sampler):
 
         return loss.mean(), vb_loss.mean()
 
-    def sample(self, x_T=None, temp=1.0, sample_steps=None, unmasked=None):
+    def sample(self, x_T=None, temp=1.0, sample_steps=None, unmasked=None, stride=None):
+
+        if stride is None:
+            stride = self.shape[0] // 4
+        assert self.shape[0] % stride == 0
+
         b, device = self.n_samples, 'cuda'
         x_t = x_T if x_T is not None else torch.ones((b, *self.shape), device=device).long() * self.mask_id
 
@@ -156,7 +161,37 @@ class AbsorbingDiffusion(Sampler):
             # update mask with changes
             unmasked = torch.bitwise_or(unmasked, changes)
 
-            x_0_logits = self._denoise_fn(x_t, t=t)
+            if x_t.shape[1] > self.shape[0]:
+                windows = int(np.ceil((x_t.shape[1] - self.shape[0]) / stride))
+                x_0_window_logits = []
+                for i in range(windows + 1):
+                    end = min(x_t.shape[1], self.shape[0] + i * stride)
+                    x_0_window_logits.append(self._denoise_fn(x_t[:,end - self.shape[0]:end], t=t))
+
+                x_0_logits = [torch.zeros((b, x_t.shape[1], c), device=device) for c in self.codebook_size]
+
+                #for c in range(len(self.codebook_size)):
+                #    x_0_logits[c][:, 0:stride] = x_0_window_logits[0][c][:, 0:stride]
+
+                for s in range(0, x_t.shape[1] // stride):
+                    for c in range(len(self.codebook_size)):
+                        window_count = 0
+                        for w in range(len(x_0_window_logits)):
+                            start = w * stride
+                            end = start + self.shape[0]
+                            if start <= s * stride and end >= (s + 1) * stride:
+                                x_0_logits[c][:, s*stride: (s+1) * stride] += \
+                                    x_0_window_logits[w][c][:, s * stride - start:(s + 1) * stride - start]
+                                window_count += 1
+                        x_0_logits[c][:, s * stride: (s + 1) * stride] /= window_count
+
+
+                #for c in range(len(self.codebook_size)):
+                #    x_0_logits[c][:, -stride:] = x_0_window_logits[-1][c][:, -stride:]
+            else:
+                x_0_logits = self._denoise_fn(x_t, t=t)
+
+
             # scale by temperature
             x_0_logits = [x / temp for x in x_0_logits]
             x_0_dist = [dists.Categorical(

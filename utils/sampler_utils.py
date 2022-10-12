@@ -19,15 +19,7 @@ def get_sampler(H):
 
 @torch.no_grad()
 def get_samples(H, sampler, x_T=None, unmasked=None):
-
-    if H.sampler == "absorbing":
-        if H.sample_type == "diffusion":
-            latents = sampler.sample(x_T=x_T, sample_steps=H.sample_steps, temp=H.temp, unmasked=unmasked)
-        else:
-            latents = sampler.sample_mlm(temp=H.temp, sample_steps=H.sample_steps)
-
-    elif H.sampler == "autoregressive":
-        latents = sampler.sample()
+    latents = sampler.sample(x_T=x_T, sample_steps=H.sample_steps, temp=H.temp, unmasked=unmasked)
 
     return latents.cpu().numpy()
 
