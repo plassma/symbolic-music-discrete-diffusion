@@ -161,25 +161,22 @@ class AbsorbingDiffusion(Sampler):
             # update mask with changes
             unmasked = torch.bitwise_or(unmasked, changes)
 
-            windows = int(np.ceil((x_t.shape[1] - self.shape[0]) / stride))
+            windows = int(np.ceil((x_t.shape[1] - self.shape[0]) / stride)) + 1
             x_0_window_logits = []
-            for i in range(windows + 1):
+            for i in range(windows):
                 end = min(x_t.shape[1], self.shape[0] + i * stride)
                 x_0_window_logits.append(self._denoise_fn(x_t[:,end - self.shape[0]:end], t=t))
 
             x_0_logits = [torch.zeros((b, x_t.shape[1], c), device=device) for c in self.codebook_size]
 
-            for s in range(0, x_t.shape[1] // stride):
-                for c in range(len(self.codebook_size)):
-                    window_count = 0
-                    for w in range(len(x_0_window_logits)):
-                        start = w * stride
-                        end = start + self.shape[0]
-                        if start <= s * stride and end >= (s + 1) * stride:
-                            x_0_logits[c][:, s*stride: (s+1) * stride] += \
-                                x_0_window_logits[w][c][:, s * stride - start:(s + 1) * stride - start]
-                            window_count += 1
-                    x_0_logits[c][:, s * stride: (s + 1) * stride] /= window_count
+            for c in range(len(self.codebook_size)):
+                counts = torch.zeros_like(x_0_logits[c][0])
+                for w in range(windows):
+                    start = w * stride
+                    end = min(start + self.shape[0], x_t.shape[1])
+                    x_0_logits[c][:, start:end] += x_0_window_logits[w][c][:, :end-start]  # joint probability over all windows
+                    counts[start:end] += 1
+                x_0_logits[c] /= counts  # maintain softmax temperature
 
 
             # scale by temperature
@@ -187,6 +184,10 @@ class AbsorbingDiffusion(Sampler):
             x_0_dist = [dists.Categorical(
                 logits=x) for x in x_0_logits]
             x_0_hat = torch.stack([xd.sample().long() for xd in x_0_dist], -1)
+
+            if not changes.any():#todo: remove this, just here for debugging purposes
+                print("no changes")
+
             x_t[changes] = x_0_hat[changes]
 
         return x_t

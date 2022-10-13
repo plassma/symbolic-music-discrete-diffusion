@@ -25,7 +25,7 @@ from note_seq import sequences_lib
 from note_seq.protobuf import music_pb2
 import numpy as np
 
-
+#todo: is this already contained in note_seq
 class MelodyExtractor(pipeline.Pipeline):
   """Extracts monophonic melodies from a quantized NoteSequence."""
 

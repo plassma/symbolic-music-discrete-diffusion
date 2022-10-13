@@ -19,8 +19,8 @@ def synth_samples(samples):
     return audios
 
 
-def prep_theme(path="mario_theme.mid"):
-    converter = OneHotMelodyConverter(slice_bars=25)
+def prep_theme(bars, path="mario_theme.mid"):
+    converter = OneHotMelodyConverter(slice_bars=bars)
     ns = midi_to_note_sequence(open(path, 'rb').read())
     tensors = list(converter.to_tensors(ns).outputs)
     tensors = [t.squeeze() for t in tensors]
@@ -36,16 +36,24 @@ def prep_theme(path="mario_theme.mid"):
 
     return x_T, mask.bool()
 
+
+def prep_sample(length=256):
+    x_T = torch.ones((N_SAMPLES, length, 3), dtype=torch.long) * torch.tensor((90, 90, 512))
+    mask = torch.zeros_like(x_T)
+
+    return x_T, mask.bool()
+
+
 if __name__ == '__main__':
 
-    theme, mask = prep_theme()
+    theme, mask = prep_theme(32, 'data/long_eval.mid')#prep_sample(1024)
 
     H = hparams.HparamsAbsorbing('Lakh')
     H.n_samples = N_SAMPLES
 
     sampler = get_sampler(H).cuda()
 
-    sampler = load_model(sampler, H.sampler, 270000, H.load_dir).cuda()
+    sampler = load_model(sampler, H.sampler, 420000, H.load_dir).cuda()
 
     ema = EMA(H.ema_beta)
     ema_sampler = copy.deepcopy(sampler)
