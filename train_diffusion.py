@@ -29,10 +29,8 @@ def get_sampler_hparams(dataset):
     return hp
 
 TRAIN_TEST_BATCH_SIZE=100
-
+#todo: ask for permission to publish repo (copied)
 def main(H, vis):
-    seq_len = H.TIME_RESOLUTION * H.DURATION_SEC
-
     midi_data = np.load('data/full_lakh.npy', allow_pickle=True)
     #midi_data = [d[:seq_len].astype(int) for d in midi_data if len(d) >= seq_len]
     idx = np.arange(len(midi_data))

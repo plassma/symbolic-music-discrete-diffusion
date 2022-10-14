@@ -165,7 +165,7 @@ class AbsorbingDiffusion(Sampler):
             x_0_window_logits = []
             for i in range(windows):
                 end = min(x_t.shape[1], self.shape[0] + i * stride)
-                x_0_window_logits.append(self._denoise_fn(x_t[:,end - self.shape[0]:end], t=t))
+                x_0_window_logits.append(self._denoise_fn(x_t[:, end - self.shape[0]:end], t=t))
 
             x_0_logits = [torch.zeros((b, x_t.shape[1], c), device=device) for c in self.codebook_size]
 
