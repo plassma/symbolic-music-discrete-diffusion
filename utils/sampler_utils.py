@@ -1,123 +1,102 @@
 import os
 import torch
 from tqdm import tqdm
+import numpy as np
 #from .log_utils import save_latents, log
-from models import Transformer, AbsorbingDiffusion
+from models import Transformer, AbsorbingDiffusion, ConVormer
 from torch.nn import DataParallel
+import torch.distributions as dists
+from transformers import BigBirdConfig, BigBirdModel
+
+from preprocessing import OneHotMelodyConverter, TrioConverter
 
 
 def get_sampler(H):
 
     if H.sampler == 'absorbing':
-        denoise_fn = Transformer(H).cuda()
+        denoise_fn = ConVormer(H).cuda()
+
         denoise_fn = DataParallel(denoise_fn).cuda()
         sampler = AbsorbingDiffusion(
             H, denoise_fn, H.codebook_size)
 
     return sampler
 
-
 @torch.no_grad()
-def get_samples(H, sampler, x_T=None, unmasked=None):
-    latents = sampler.sample(x_T=x_T, sample_steps=H.sample_steps, temp=H.temp, unmasked=unmasked)
+def get_samples(sampler, sample_steps, x_T=None, temp=1.0):
+    sampler.eval()
 
-    return latents.cpu().numpy()
+    if x_T is not None and not torch.is_tensor(x_T):
+        x_T = torch.tensor(x_T).to(next(sampler.parameters()).device)
 
-def get_samples_direct(H, sampler):
-    if H.sampler == "absorbing" or H.sampler == "absorbing_MNIST":
-        if H.sample_type == "diffusion":
-            latents = sampler.sample()
-        else:
-            latents = sampler.sample_mlm(temp=H.temp, sample_steps=H.sample_steps)
+    result = sampler.sample(sample_steps=sample_steps, x_T=x_T, temp=temp)
+    return result.cpu().numpy()
 
-    elif H.sampler == "autoregressive":
-        latents = sampler.sample()
-    latents = latents.view(-1, 1, 28, 28) / 256
-    return latents
-
-
-def latent_ids_to_onehot(latent_ids, latent_shape, codebook_size):
-    min_encoding_indices = latent_ids.view(-1).unsqueeze(1)
-    encodings = torch.zeros(
-        min_encoding_indices.shape[0],
-        codebook_size
-    ).to(latent_ids.device)
-    encodings.scatter_(1, min_encoding_indices, 1)
-    one_hot = encodings.view(
-        latent_ids.shape[0],
-        latent_shape[1],
-        latent_shape[2],
-        codebook_size
-    )
-    return one_hot.reshape(one_hot.shape[0], -1, codebook_size)
-
-
-@torch.no_grad()
-def generate_latent_ids(H, ae, train_loader, val_loader=None):
-    train_latent_ids = generate_latents_from_loader(H, ae, train_loader)
-    if val_loader is not None:
-        val_latent_ids = generate_latents_from_loader(H, ae, val_loader)
+def np_to_ns(x):
+    if x.shape[-1] == 1:
+        converter = OneHotMelodyConverter()
+        return converter.from_tensors(x.squeeze())
+    elif x.shape[-1] == 3:
+        converter = TrioConverter()
+        return converter.from_tensors(x)
     else:
-        val_latent_ids = None
-
-    #save_latents(H, train_latent_ids, val_latent_ids)
-
-
-def generate_latents_from_loader(H, autoencoder, dataloader):
-    latent_ids = []
-    for x, _ in tqdm(dataloader):
-        x = x.cuda()
-        latents = autoencoder.encoder(x)  # B, emb_dim, H, W
-
-        latents = latents.permute(0, 2, 3, 1).contiguous()  # B, H, W, emb_dim
-        latents_flattened = latents.view(-1, H.emb_dim)  # B*H*W, emb_dim
-
-        # distances from z to embeddings e_j (z - e)^2 = z^2 + e^2 - 2 e * z
-        distances = (latents_flattened ** 2).sum(dim=1, keepdim=True) + \
-            (autoencoder.quantize.embedding.weight**2).sum(1) - \
-            2 * torch.matmul(latents_flattened, autoencoder.quantize.embedding.weight.t())
-
-        min_encoding_indices = torch.argmin(distances, dim=1)
-
-        latent_ids.append(min_encoding_indices.reshape(x.shape[0], -1).cpu().contiguous())
-    return torch.cat(latent_ids, dim=0)
-
+        raise Exception(f"unsupported number of tracks: {x.shape[-1]}")
 
 @torch.no_grad()
-def get_latent_loaders(H, get_validation_loader=True, shuffle=True):
-    latents_fp_suffix = "_flipped" if H.horizontal_flip else ""
+def sample_interleaved(b, samplers, x_T=None, temp=1.0, sample_steps=None, unmasked=None, strides=None):
 
-    train_latents_fp = f"latents/{H.dataset}_{H.latent_shape[-1]}_train_latents{latents_fp_suffix}"
-    train_latent_ids = torch.load(train_latents_fp)
-    train_latent_loader = torch.utils.data.DataLoader(train_latent_ids, batch_size=H.n_samples, shuffle=shuffle)
+    #assert maskid equal, first should be largest sampler
 
-    if get_validation_loader:
-        val_latents_fp = f"latents/{H.dataset}_{H.latent_shape[-1]}_val_latents{latents_fp_suffix}"
-        val_latent_ids = torch.load(val_latents_fp)
-        val_latent_loader = torch.utils.data.DataLoader(val_latent_ids, batch_size=H.n_samples, shuffle=shuffle)
-    else:
-        val_latent_loader = None
+    if strides is None:
+        strides = [s.shape[0] // 4 for s in samplers]
+    for i, s in enumerate(samplers):
+        assert s.shape[0] % strides[i] == 0
 
-    return train_latent_loader, val_latent_loader
+    device ='cuda'
+    x_t = x_T if x_T is not None else torch.ones((b, *samplers[0].shape), device=device).long() * samplers[0].mask_id
+
+    if unmasked is None:
+        unmasked = torch.zeros_like(x_t, device=device).bool()
+
+    sample_steps = list(range(1, sample_steps+1))
+
+    for timestep in reversed(sample_steps):
+        print(f'Sample timestep {timestep:4d}', end='\r')
+
+        t = torch.full((b,), timestep, device=device, dtype=torch.long)
+
+        # where to unmask
+        changes = torch.rand(x_t.shape, device=device) < 1/t.float().view(-1, *((1,) * (len(x_t.shape) - 1)))
+        # don't unmask somewhere already unmasked
+        changes = torch.bitwise_xor(changes, torch.bitwise_and(changes, unmasked))
+        # update mask with changes
+        unmasked = torch.bitwise_or(unmasked, changes)
+
+        self = samplers[timestep % len(samplers)]
+        windows = int(np.ceil((x_t.shape[1] - self.shape[0]) / strides[timestep % len(samplers)])) + 1
+        x_0_window_logits = []
+        for i in range(windows):
+            end = min(x_t.shape[1], self.shape[0] + i * strides[timestep % len(samplers)])
+            x_0_window_logits.append(self._denoise_fn(x_t[:, end - self.shape[0]:end], t=t))
+
+        x_0_logits = [torch.zeros((b, x_t.shape[1], c), device=device) for c in self.codebook_size]
+
+        for c in range(len(self.codebook_size)):
+            counts = torch.zeros_like(x_0_logits[c][0])
+            for w in range(windows):
+                start = w * strides[timestep % len(samplers)]
+                end = min(start + self.shape[0], x_t.shape[1])
+                x_0_logits[c][:, start:end] += x_0_window_logits[w][c][:, :end-start]  # joint probability over all windows
+                counts[start:end] += 1
+            x_0_logits[c] /= counts  # maintain softmax temperature
 
 
-# TODO: rethink this whole thing - completely unnecessarily complicated
-def retrieve_autoencoder_components_state_dicts(H, components_list, remove_component_from_key=False):
-    state_dict = {}
-    # default to loading ema models first
-    ae_load_path = f"logs/{H.ae_load_dir}/saved_models/vqgan_ema_{H.ae_load_step}.th"
-    if not os.path.exists(ae_load_path):
-        ae_load_path = f"logs/{H.ae_load_dir}/saved_models/vqgan_{H.ae_load_step}.th"
-    print(f"Loading VQGAN from {ae_load_path}")
-    full_vqgan_state_dict = torch.load(ae_load_path, map_location="cpu")
+        # scale by temperature
+        x_0_logits = [x / temp for x in x_0_logits]
+        x_0_dist = [dists.Categorical(
+            logits=x) for x in x_0_logits]
+        x_0_hat = torch.stack([xd.sample().long() for xd in x_0_dist], -1)
 
-    for key in full_vqgan_state_dict:
-        for component in components_list:
-            if component in key:
-                new_key = key[3:]  # remove "ae."
-                if remove_component_from_key:
-                    new_key = new_key[len(component)+1:]  # e.g. remove "quantize."
+        x_t[changes] = x_0_hat[changes]
 
-                state_dict[new_key] = full_vqgan_state_dict[key]
-
-    return state_dict
+    return x_t.cpu().numpy()

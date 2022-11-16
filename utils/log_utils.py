@@ -2,10 +2,9 @@ import os
 import torch
 import visdom
 import numpy as np
-from .audio_utils import synth_tracks
 import logging
-from preprocessing.data import TrioConverter
-from note_seq import fluidsynth
+from preprocessing.data import TrioConverter, OneHotMelodyConverter
+from note_seq import fluidsynth, note_sequence_to_midi_file
 
 def log(output):
     logging.info(output)
@@ -68,22 +67,36 @@ def save_stats(H, stats, step):
     torch.save(stats, save_path)
 
 
-def vis_tracks_old(vis, samples, step):
-    audios = synth_tracks(samples)
+def save_noteseqs(ns, prefix='pre_adv'):
+    for i, n in enumerate(ns):
+        note_sequence_to_midi_file(n, prefix + f'_{i}.mid')
 
-    for i, audio in enumerate(audios):
-        t = f'sample_{i}'
-        vis.audio(audio, win=t, env=f'samples_{step}', opts=dict(title=t))
+
+def samples_2_noteseq(np_samples):
+    if np_samples.shape[2] == 3:
+        converter = TrioConverter(16)#todo: Hparams, async
+    else:
+        converter = OneHotMelodyConverter()
+        np_samples = np_samples[:, :, 0]
+    return converter.from_tensors(np_samples)
+
+
+def sample_audio(samples):
+    samples = samples_2_noteseq(samples)
+    return [fluidsynth(s, 44100., 'soundfont.sf2') for s in samples]
 
 
 def vis_samples(vis, samples, step):
-    converter = TrioConverter(16)#todo: Hparams, async
-    samples = converter.from_tensors(samples)
-    audios = [fluidsynth(s, 44100., 'soundfont.sf2') for s in samples]
+    audios = sample_audio(samples)
 
     for i, audio in enumerate(audios):
         t = f'sample_{i}'
-        vis.audio(audio, win=t, env=f'samples_{step}', opts=dict(title=t))
+        try:
+            vis.audio(audio, win=t, env=f'samples_{step}', opts=dict(title=t))
+        except Exception as e:
+            log(f'could not vis audio sample {i} for step {step}')
+            log(e)
+
 
 def load_stats(H, step):
     load_path = f"logs/{H.load_dir}/saved_stats/stats_{step}"

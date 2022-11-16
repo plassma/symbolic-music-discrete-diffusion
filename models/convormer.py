@@ -63,17 +63,6 @@ class CausalSelfAttention(nn.Module):
         return y, present
 
 
-def get_big_bird_attention(H):
-    from types import SimpleNamespace
-    config = SimpleNamespace()
-    config.num_attention_heads = H.bert_n_head
-    config.num_random_blocks = 3
-    config.block_size = 64
-    config.max_position_embeddings = H.block_size
-    config.hidden_size = H.bert_n_emb
-    config.use_bias = False
-    return BigBirdBlockSparseAttention(config)
-
 class Block(nn.Module):
     """ an unassuming Transformer block """
 
@@ -81,7 +70,7 @@ class Block(nn.Module):
         super().__init__()
         self.ln1 = nn.LayerNorm(H.bert_n_emb)
         self.ln2 = nn.LayerNorm(H.bert_n_emb)
-        self.attn = CausalSelfAttention(H)#get_big_bird_attention(H)
+        self.attn = CausalSelfAttention(H)
         self.mlp = nn.Sequential(
             nn.Linear(H.bert_n_emb, 4 * H.bert_n_emb),
             nn.GELU(),  # nice
@@ -100,7 +89,7 @@ class Block(nn.Module):
         return x
 
 
-class Transformer(nn.Module):
+class ConVormer(nn.Module):
     """  the full GPT language model, with a context size of block_size """
 
     def __init__(self, H):
@@ -108,16 +97,22 @@ class Transformer(nn.Module):
 
         self.vocab_size = [h + 1 for h in H.codebook_size]
         self.n_embd = H.bert_n_emb
-        self.block_size = H.block_size
+        self.conv_len = 4
+        self.block_size = H.block_size // self.conv_len
         self.n_layers = H.bert_n_layers
         self.codebook_size = H.codebook_size
         self.causal = H.sampler == 'autoregressive'
+
+        self.conv = nn.Conv1d(self.n_embd // self.conv_len, self.n_embd, self.conv_len, self.conv_len)
+        self.deconv = nn.ConvTranspose1d(self.n_embd, self.n_embd // self.conv_len, self.conv_len, self.conv_len)
+
         if self.causal:
             self.vocab_size = H.codebook_size
 
-        self.tok_emb = nn.ModuleList([nn.Embedding(vs, self.n_embd) for vs in self.vocab_size])
+        self.tok_emb = nn.ModuleList([nn.Embedding(vs, self.n_embd // self.conv_len) for vs in self.vocab_size])
         #self.emb_red = nn.Linear(1536, 512)
         self.pos_emb = nn.Parameter(torch.zeros(1, self.block_size, self.n_embd))
+        self.bar_pos_emb = nn.Parameter(torch.zeros(1, self.conv_len, self.n_embd // self.conv_len))
         self.start_tok = nn.Parameter(torch.zeros(1, 1, self.n_embd))
         self.drop = nn.Dropout(H.embd_pdrop)
 
@@ -125,7 +120,7 @@ class Transformer(nn.Module):
         self.blocks = nn.Sequential(*[Block(H) for _ in range(self.n_layers)])
         # decoder head
         self.ln_f = nn.LayerNorm(self.n_embd)
-        self.head = nn.ModuleList([nn.Linear(self.n_embd, cs, bias=False) for cs in self.codebook_size])
+        self.head = nn.ModuleList([nn.Linear(self.n_embd // self.conv_len, cs, bias=False) for cs in self.codebook_size])
 
     def get_block_size(self):
         return self.block_size
@@ -144,6 +139,9 @@ class Transformer(nn.Module):
         token_embeddings = [t(idx[:, :, i]) for i, t in enumerate(self.tok_emb)]
         token_embeddings = torch.cat(token_embeddings,-1)# todo: try other combinations of embeddings (concat?)
         #token_embeddings = self.emb_red(token_embeddings)
+        token_embeddings += self.bar_pos_emb[0, torch.arange(self.conv_len).repeat(idx.shape[1] // self.conv_len)]
+        token_embeddings = self.conv(token_embeddings.transpose(1, 2)).transpose(1, 2)
+        token_embeddings = F.relu(token_embeddings)
         if self.causal:
             token_embeddings = torch.cat(
                 (self.start_tok.repeat(token_embeddings.size(0), 1, 1), token_embeddings),
@@ -161,29 +159,36 @@ class Transformer(nn.Module):
         for block in self.blocks:
             x = block(x)
         x = self.ln_f(x)
+        x = self.deconv(x.transpose(1, 2)).transpose(1, 2)
+        x = F.relu(x)
         logits = [h(x) for h in self.head]
 
         return logits
 
 
-class TransformerDiscriminator(nn.Module):
+class ConVormerDiscriminator(nn.Module):
     """  the full GPT language model, with a context size of block_size """
 
-    def __init__(self, H):
+    def __init__(self, H, bert_layers=12):
         super().__init__()
 
         self.vocab_size = [h + 1 for h in H.codebook_size]
         self.n_embd = H.bert_n_emb
-        self.block_size = H.block_size
-        self.n_layers = H.bert_n_layers
+        self.conv_len = 4
+        self.block_size = H.block_size // self.conv_len
+        self.n_layers = bert_layers
         self.codebook_size = H.codebook_size
         self.causal = H.sampler == 'autoregressive'
+
+        self.conv = nn.Conv1d(self.n_embd // self.conv_len, self.n_embd, self.conv_len, self.conv_len)
+
         if self.causal:
             self.vocab_size = H.codebook_size
 
-        self.tok_emb = nn.ParameterList([nn.Parameter(torch.zeros(1, vs, self.n_embd)) for vs in H.codebook_size])
+        self.tok_emb = nn.Parameter(torch.zeros(1, self.codebook_size[0], self.n_embd // self.conv_len)) #  nn.ModuleList([nn.Embedding(vs, self.n_embd // self.conv_len) for vs in self.vocab_size])
         #self.emb_red = nn.Linear(1536, 512)
         self.pos_emb = nn.Parameter(torch.zeros(1, self.block_size, self.n_embd))
+        self.bar_pos_emb = nn.Parameter(torch.zeros(1, self.conv_len, self.n_embd // self.conv_len))
         self.start_tok = nn.Parameter(torch.zeros(1, 1, self.n_embd))
         self.drop = nn.Dropout(H.embd_pdrop)
 
@@ -210,10 +215,11 @@ class TransformerDiscriminator(nn.Module):
                 module.bias.data.zero_()
 
     def forward(self, x_one_hot, t=None):
-        # each index maps to a (learnable) vector
         token_embeddings = [x.float() @ t for x, t in zip(x_one_hot, self.tok_emb)]
-        token_embeddings = torch.cat(token_embeddings,-1)# todo: try other combinations of embeddings (concat?)
         #token_embeddings = self.emb_red(token_embeddings)
+        token_embeddings += self.bar_pos_emb[0, torch.arange(self.conv_len).repeat(x_one_hot.shape[1] // self.conv_len)]
+        token_embeddings = self.conv(token_embeddings.transpose(1, 2)).transpose(1, 2)
+        token_embeddings = F.relu(token_embeddings)
         if self.causal:
             token_embeddings = torch.cat(
                 (self.start_tok.repeat(token_embeddings.size(0), 1, 1), token_embeddings),

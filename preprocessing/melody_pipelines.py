@@ -15,8 +15,8 @@
 """Data processing pipelines for melodies."""
 import logging
 
-from . import pipeline
-from . import statistics
+from preprocessing import pipeline
+from preprocessing import statistics
 from note_seq import events_lib
 from note_seq import melodies_lib
 from note_seq import Melody

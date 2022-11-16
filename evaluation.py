@@ -2,46 +2,30 @@ import copy
 import itertools
 from statistics import NormalDist
 
+import itertools
+from statistics import NormalDist
+
 import numpy as np
-import torch
-from note_seq import midi_to_note_sequence, quantize_note_sequence, note_sequence_to_midi_file
+from note_seq import quantize_note_sequence
 from note_seq import sequences_lib
+from tqdm import tqdm
 
 import hparams
-from preprocessing import TrioConverter
-from utils import load_model
-from utils.sampler_utils import get_samples, get_sampler
-from utils.train_utils import EMA
+from utils import SubseqSampler, np_to_ns, log, get_sampler, load_model, EMA
+from utils.sampler_utils import get_samples
 
-N_SAMPLES = 4
-
-
-def prep_piece(bars, path="mario_theme.mid"):
-    converter = TrioConverter(bars)
-    ns = midi_to_note_sequence(open(path, 'rb').read())
-    tensors = list(converter.to_tensors(ns).outputs)
-    tensors = [t.squeeze() for t in tensors]
-
-    melody = tensors[0]
-    x_T = torch.tensor(melody).tile((N_SAMPLES, 1, 1))
-
-    x_T[:, 256:768, 0] = 90
-    x_T[:, 256:768, 1] = 90
-    x_T[:, 256:768, 2] = 512
-
-    mask = torch.ones_like(x_T)
-    mask[:, 256:768] = 0
-
-    return x_T, mask.bool(), tensors[0]
-
+N_SAMPLES = 256
 
 def frame_statistics(bars):
     bars = list(itertools.chain(*bars))
-    stats = lambda x: NormalDist(np.mean(x), np.std(x))
+    stats = lambda x: NormalDist(np.mean(x), np.std(x) + 1e-6)
     return stats([n.pitch for n in bars]), stats([n.quantized_end_step - n.quantized_start_step for n in bars])
 
 
 def framewise_overlap_areas(ns, width=4, hop=2):
+    if not len(ns.notes):
+        return [np.nan, np.nan]
+
     qns = quantize_note_sequence(ns, 4)
     steps_per_bar = sequences_lib.steps_per_bar_in_quantized_sequence(qns)
     assert steps_per_bar == 16.
@@ -63,14 +47,16 @@ def framewise_overlap_areas(ns, width=4, hop=2):
 
     OAs = []
     for i in range(len(frames) - 1):
-        if all([(frames[i][j].variance and frames[i+1][j].variance) for j in [0, 1]]):
-            OAs.append([frames[i][j].overlap(frames[i+1][j]) for j in [0, 1]])
+        OAs.append([frames[i][j].overlap(frames[i+1][j]) for j in [0, 1]])
 
     return np.array(OAs).mean(0)
 
 
 def evaluate_consistency_variance(targets, preds):
-    OA_t, OA_p = np.array([framewise_overlap_areas(t) for t in targets]), np.array([framewise_overlap_areas(p) for p in preds])
+    OA_t = [framewise_overlap_areas(t) for t in targets]
+    OA_p = [framewise_overlap_areas(p) for p in preds]
+    OA_t, OA_p = [oa for oa in OA_t if not np.isnan(oa).any()], [oa for oa in OA_p if not np.isnan(oa).any()]
+    OA_t, OA_p = np.stack(OA_t), np.stack(OA_p)
 
 
     consistency = 1 - np.abs(OA_t.mean(0) - OA_p.mean(0)) / OA_t.mean(0)
@@ -78,62 +64,76 @@ def evaluate_consistency_variance(targets, preds):
 
     return np.clip(consistency, 0, 1), np.clip(variance, 0, 1)
 
-def evaluate_unconditional(batches = 100, batch_size=1000):
-    midi_data = np.load('data/full_lakh.npy', allow_pickle=True)
 
-    samples = []
+def get_rand_dataset_subset(midi_data, size=1000):
+    idx = np.random.choice(midi_data.dataset.shape[0], size)
+    return midi_data[idx]
 
-    while len(samples) < batch_size:
-        sa = get_samples(H, ema_sampler if H.ema else sampler)
-        for s in sa:
-            samples.append(s)
 
-    idx = np.random.choice(midi_data.shape[0], batch_size)
-    originals = midi_data[idx]
+def get_samples_for_eval(mode, dataset, size=1000):
+    sampler.n_samples = min(N_SAMPLES, size)
+    originals = get_rand_dataset_subset(dataset, size)
+    if mode == 'unconditional':
+        samples = []
+        for _ in tqdm(range(int(np.ceil(size / H.n_samples)))):
+            sa = get_samples(ema_sampler if H.ema else sampler, 1024)
+            samples.append(sa)
+        samples = np.stack(samples)
+    elif mode == 'infilling':
+        samples = originals.copy()
+        samples[:, H.gap_start:H.gap_end] = np.array(H.codebook_size)
+        for i in tqdm(range(int(np.ceil(size / H.n_samples)))):
+            samples[i * N_SAMPLES:(i + 1) * N_SAMPLES] = \
+                get_samples(ema_sampler if H.ema else sampler, 1024, x_T=samples[i * N_SAMPLES:(i + 1) * N_SAMPLES])
+    else:  # self
+        samples = get_rand_dataset_subset(dataset, size)
 
-    converter = TrioConverter()
-    to_ns = lambda x: converter.from_tensors(np.expand_dims(x, 0))[0]
+    return np_to_ns(samples[:size]), np_to_ns(originals)
 
-    samples, originals = [to_ns(s) for s in samples], [to_ns(o) for o in originals]
 
-    c, v = evaluate_consistency_variance(originals, samples)
+def evaluate(eval_dataset_path, mode='unconditional', batches=100, evaluations_per_batch=10, batch_size=1000, notes=1024):
 
-    print(c, v)
+    if mode == 'infilling':
+        if evaluations_per_batch != 1:
+            log("Infilling only allows one evaluation per batch")
+        evaluations_per_batch = 1
+
+    midi_data = np.load(eval_dataset_path, allow_pickle=True)
+    midi_data = SubseqSampler(midi_data, notes)
+
+    for i in range(batches):
+        samples, originals = get_samples_for_eval(mode, midi_data, batch_size)
+
+        CVs = []
+        for e in range(evaluations_per_batch):
+            c, v = evaluate_consistency_variance(originals, samples)
+            CVs.append((c, v))
+            print(c, v)
+            originals = get_rand_dataset_subset(midi_data, batch_size)
+            originals = np_to_ns(originals)
+
+        CVs = np.array(CVs)
+        print(f"avg for samples {i}:", CVs.mean(0))
 
 
 if __name__ == '__main__':
-    H = hparams.HparamsAbsorbing('Lakh')
+    H = hparams.HparamsAbsorbingConv('Lakh', 64)
     H.n_samples = N_SAMPLES
 
+    H.gap_start = H.NOTES // 4
+    H.gap_end = (H.NOTES * 3) // 4
+
     sampler = get_sampler(H).cuda()
-
-    sampler = load_model(sampler, H.sampler, 420000, H.load_dir).cuda()
-
+    load_step = 690000
+    sampler = load_model(sampler, H.sampler, load_step, H.load_dir).cuda()
+    sampler.eval()
     ema = EMA(H.ema_beta)
     ema_sampler = copy.deepcopy(sampler)
 
-    if H.ema:
-        try:
-            ema_sampler = load_model(
-                ema_sampler, f'{H.sampler}_ema', H.load_step, H.load_dir)
-        except Exception:
-            ema_sampler = copy.deepcopy(sampler)
+    try:
+        ema_sampler = load_model(
+            ema_sampler, f'{H.sampler}_ema', load_step, H.load_dir)
+    except Exception as e:
+        ema_sampler = copy.deepcopy(sampler)
 
-    evaluate_unconditional(2, 100)
-
-    #x_T, mask, original = prep_piece(64, 'data/long_eval.mid')
-
-    #converter = TrioConverter(16)  # todo: Hparams, async
-
-    #if False:
-    #    samples = get_samples(H, ema_sampler if H.ema else sampler, x_T.cuda(), mask.cuda())
-    #    samples = converter.from_tensors(samples)
-    #else:
-    #    samples = [midi_to_note_sequence(open(f'sample_{i}.mid', 'rb').read()) for i in range(4)]
-    #original = converter.from_tensors(np.expand_dims(original, 0))[0]
-    #if False:
-    #    note_sequence_to_midi_file(original, 'sample_original.mid')
-    #    [note_sequence_to_midi_file(s, f'sample_{i}.mid') for i, s in enumerate(samples)]
-    #for i in range(len(samples)):
-    #    c, v = evaluate_consistency_variance(original, samples[i])
-    #    print(f'Consistency: {c}, Variance: {v}')
+    evaluate('data/lakh_melody_64_1MIO.npy', mode='infilling', batches=5, evaluations_per_batch=10, batch_size=1000)

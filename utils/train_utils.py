@@ -1,3 +1,15 @@
+import itertools
+from statistics import NormalDist
+
+import numpy as np
+from note_seq import quantize_note_sequence
+from note_seq import sequences_lib
+from tqdm import tqdm
+
+from preprocessing import OneHotMelodyConverter
+from .sampler_utils import get_samples
+
+
 class EMA():
     def __init__(self, beta):
         super().__init__()
@@ -18,3 +30,85 @@ def optim_warmup(H, step, optim):
     lr = H.lr * float(step) / H.warmup_iters
     for param_group in optim.param_groups:
         param_group['lr'] = lr
+
+def frame_statistics(bars):
+    bars = list(itertools.chain(*bars))
+    stats = lambda x: NormalDist(np.mean(x), np.std(x) + 1e-6)
+    return stats([n.pitch for n in bars]), stats([n.quantized_end_step - n.quantized_start_step for n in bars])
+
+
+def framewise_overlap_areas(ns, width=4, hop=2):
+    if not len(ns.notes):
+        return [np.nan, np.nan]
+
+    qns = quantize_note_sequence(ns, 4)
+    steps_per_bar = sequences_lib.steps_per_bar_in_quantized_sequence(qns)
+    assert steps_per_bar == 16.
+    steps_per_bar = 16
+
+    by_bar = [[] for _ in range(max([n.quantized_end_step for n in qns.notes]) // steps_per_bar + 1)]
+
+    for note in qns.notes:
+        k = note.quantized_start_step // steps_per_bar
+        by_bar[k].append(note)
+        #if note.quantized_end_step // steps_per_bar != k:#todo: how 2 handle bar crossing notes?
+        #    by_bar[note.quantized_end_step // steps_per_bar].append(note)
+
+    frames = []
+
+    for f in range((len(by_bar) - width) // hop):
+        start_bar = hop * f
+        frames.append(frame_statistics(by_bar[start_bar:start_bar+width]))
+
+    OAs = []
+    for i in range(len(frames) - 1):
+        OAs.append([frames[i][j].overlap(frames[i+1][j]) for j in [0, 1]])
+
+    return np.array(OAs).mean(0)
+
+
+def evaluate_consistency_variance(targets, preds):
+    OA_t = [framewise_overlap_areas(t) for t in targets]
+    OA_p = [framewise_overlap_areas(p) for p in preds]
+    OA_t, OA_p = [oa for oa in OA_t if not np.isnan(oa).any()], [oa for oa in OA_p if not np.isnan(oa).any()]
+    OA_t, OA_p = np.stack(OA_t), np.stack(OA_p)
+
+
+    consistency = 1 - np.abs(OA_t.mean(0) - OA_p.mean(0)) / OA_t.mean(0)
+    variance = 1 - np.abs(OA_t.var(0) - OA_p.var(0)) / OA_t.var(0)
+
+    return np.clip(consistency, 0, 1), np.clip(variance, 0, 1)
+
+
+def evaluate_unconditional(midi_data, sampler, H, evaluations=10, batch_size=1000):
+
+    converter = OneHotMelodyConverter()
+    to_ns = lambda x: converter.from_tensors(np.expand_dims(x[:, 0], 0))[0]
+
+    old_n_samples = sampler.n_samples
+    N_SAMPLES = 256
+    sampler.n_samples = N_SAMPLES
+
+    samples = []
+
+    for _ in tqdm(range(int(np.ceil(batch_size / N_SAMPLES)))):
+        sa = get_samples(H, sampler)
+        for s in sa:
+            samples.append(s)
+
+    sampler.n_samples = old_n_samples
+
+    samples = [to_ns(s) for s in samples[:batch_size]]
+    CVs = []
+
+    for e in range(evaluations):
+        idx = np.random.choice(midi_data.dataset.shape[0], batch_size)
+        originals = midi_data.dataset[idx]
+
+        originals = [to_ns(o) for o in originals]
+
+        c, v = evaluate_consistency_variance(originals, samples)
+        CVs.append((c, v))
+
+    CVs = np.array(CVs)
+    return CVs.mean(0)

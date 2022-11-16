@@ -21,12 +21,15 @@ class AbsorbingDiffusion(Sampler):
         self.loss_type = H.loss_type
         self.mask_schedule = H.mask_schedule
         self.aux_weight = aux_weight
-        self.register_buffer('Lt_history', torch.zeros(self.num_timesteps+1))
-        self.register_buffer('Lt_count', torch.zeros(self.num_timesteps+1))
-        self.register_buffer('loss_history', torch.zeros(self.num_timesteps+1))
+
         self.register_buffer('mask_id', torch.tensor(mask_id))
 
         assert self.mask_schedule in ['random', 'fixed']
+
+    def hack_init_loss_history(self):
+        self.register_buffer('Lt_history', torch.zeros(self.num_timesteps+1))
+        self.register_buffer('Lt_count', torch.zeros(self.num_timesteps+1))
+        self.register_buffer('loss_history', torch.zeros(self.num_timesteps+1))
 
     def sample_time(self, b, device, method='uniform'):
         if method == 'importance':
@@ -97,13 +100,13 @@ class AbsorbingDiffusion(Sampler):
             x_t, x_0_ignore, mask = self.q_sample_mlm(x_0=x_0, t=t)
 
         # sample p(x_0 | x_t)
-        x_0_hat_logits = self._denoise_fn(x_t, t=t)
+        x_0_hat_logits = self._denoise_fn(x_t)#todo: check time even necessary?!
         x_0_hat_logits = [el.permute(0, 2, 1) for el in x_0_hat_logits]
 
         # Always compute ELBO for comparison purposes
         cross_entropy_loss = [F.cross_entropy(x, x_0_ignore[:, :, i], ignore_index=-1, reduction='none').sum(1)
                               for i, x in enumerate(x_0_hat_logits)]
-        cross_entropy_loss = torch.stack(cross_entropy_loss).mean(0)
+        cross_entropy_loss = torch.stack(cross_entropy_loss).sum(0)
 
         vb_loss = cross_entropy_loss / t
         vb_loss = vb_loss / pt
@@ -136,61 +139,35 @@ class AbsorbingDiffusion(Sampler):
 
         return loss.mean(), vb_loss.mean()
 
-    def sample(self, x_T=None, temp=1.0, sample_steps=None, unmasked=None, stride=None):
-
-        if stride is None:
-            stride = self.shape[0] // 4
-        assert self.shape[0] % stride == 0
-
+    def sample(self, temp=1.0, sample_steps=None, x_T=None):
         b, device = self.n_samples, 'cuda'
-        x_t = x_T if x_T is not None else torch.ones((b, *self.shape), device=device).long() * self.mask_id
+        if x_T is None:
+            x_T = torch.ones((b, *self.shape), device=device).long() * self.mask_id
+        unmasked = torch.zeros_like(x_T, device=device, dtype=torch.bool)
+        unmasked[x_T != self.mask_id] = True
 
-        if unmasked is None:
-            unmasked = torch.zeros_like(x_t, device=device).bool()
-
-        sample_steps = list(range(1, sample_steps+1))
+        sample_steps = list(range(1, sample_steps + 1))
 
         for t in reversed(sample_steps):
             print(f'Sample timestep {t:4d}', end='\r')
             t = torch.full((b,), t, device=device, dtype=torch.long)
 
             # where to unmask
-            changes = torch.rand(x_t.shape, device=device) < 1/t.float().view(-1, *((1,) * (len(x_t.shape) - 1)))
+            changes = torch.rand(x_T.shape, device=device) < 1 / t.float().view(-1, *((1,) * (len(x_T.shape) - 1)))
             # don't unmask somewhere already unmasked
             changes = torch.bitwise_xor(changes, torch.bitwise_and(changes, unmasked))
             # update mask with changes
             unmasked = torch.bitwise_or(unmasked, changes)
 
-            windows = int(np.ceil((x_t.shape[1] - self.shape[0]) / stride)) + 1
-            x_0_window_logits = []
-            for i in range(windows):
-                end = min(x_t.shape[1], self.shape[0] + i * stride)
-                x_0_window_logits.append(self._denoise_fn(x_t[:, end - self.shape[0]:end], t=t))
-
-            x_0_logits = [torch.zeros((b, x_t.shape[1], c), device=device) for c in self.codebook_size]
-
-            for c in range(len(self.codebook_size)):
-                counts = torch.zeros_like(x_0_logits[c][0])
-                for w in range(windows):
-                    start = w * stride
-                    end = min(start + self.shape[0], x_t.shape[1])
-                    x_0_logits[c][:, start:end] += x_0_window_logits[w][c][:, :end-start]  # joint probability over all windows
-                    counts[start:end] += 1
-                x_0_logits[c] /= counts  # maintain softmax temperature
-
-
+            x_0_logits = self._denoise_fn(x_T, t=t)
             # scale by temperature
             x_0_logits = [x / temp for x in x_0_logits]
             x_0_dist = [dists.Categorical(
                 logits=x) for x in x_0_logits]
             x_0_hat = torch.stack([xd.sample().long() for xd in x_0_dist], -1)
+            x_T[changes] = x_0_hat[changes]
 
-            if not changes.any():#todo: remove this, just here for debugging purposes
-                print("no changes")
-
-            x_t[changes] = x_0_hat[changes]
-
-        return x_t
+        return x_T
 
     def sample_mlm(self, temp=1.0, sample_steps=None):
         b, device = self.n_samples, 'cuda'
@@ -229,10 +206,11 @@ class AbsorbingDiffusion(Sampler):
         stats = {'loss': loss, 'vb_loss': vb_loss}
         return stats
 
+    @torch.no_grad()
     def sample_shape(self, shape, num_samples, time_steps=1000, step=1, temp=0.8):
         device = 'cuda'
         x_t = torch.ones((num_samples,) + shape, device=device).long() * self.mask_id
-        x_lim, y_lim = shape[0] - self.shape[1], shape[1] - self.shape[2]
+        x_lim = shape[0] - self.shape[0]
 
         unmasked = torch.zeros_like(x_t, device=device).bool()
 
@@ -240,7 +218,7 @@ class AbsorbingDiffusion(Sampler):
         for t in tqdm(list(reversed(list(range(1, time_steps+1))))):
             t = torch.full((num_samples,), t, device='cuda', dtype=torch.long)
 
-            unmasking_method = 'autoregressive'
+            unmasking_method = 'random'
             if unmasking_method == 'random':
                 # where to unmask
                 changes = torch.rand(x_t.shape, device=device) < 1/t.float().unsqueeze(-1).unsqueeze(-1)
@@ -256,31 +234,30 @@ class AbsorbingDiffusion(Sampler):
                 autoregressive_step += 1
 
             # keep track of PoE probabilities
-            x_0_probs = torch.zeros((num_samples,) + shape + (self.codebook_size,), device='cuda')
+            x_0_probs = torch.zeros((num_samples,) + shape + self.codebook_size, device='cuda')
             # keep track of counts
             count = torch.zeros((num_samples,) + shape, device='cuda')
 
             # TODO: Monte carlo approximate this instead
             for i in range(0, x_lim+1, step):
-                for j in range(0, y_lim+1, step):
-                    # collect local noisy area
-                    x_t_part = x_t[:, i:i+self.shape[1], j:j+self.shape[2]]
+                # collect local noisy area
+                x_t_part = x_t[:, i:i+self.shape[0]]
 
-                    # increment count
-                    count[:, i:i+self.shape[1], j:j+self.shape[2]] += 1.0
+                # increment count
+                count[:, i:i+self.shape[0]] += 1.0
 
-                    # flatten
-                    x_t_part = x_t_part.reshape(x_t_part.size(0), -1)
+                # flatten
+                #x_t_part = x_t_part.reshape(x_t_part.size(0), -1)
 
-                    # denoise
-                    x_0_logits_part = self._denoise_fn(x_t_part, t=t)
+                # denoise
+                x_0_logits_part = self._denoise_fn(x_t_part, t=t)
 
-                    # unflatten
-                    x_0_logits_part = x_0_logits_part.reshape(x_t_part.size(0), self.shape[1], self.shape[2], -1)
+                # unflatten
+                #x_0_logits_part = x_0_logits_part.reshape(x_t_part.size(0), self.shape[1], -1)
 
-                    # multiply probabilities
-                    # for mixture
-                    x_0_probs[:, i:i+self.shape[1], j:j+self.shape[2]] += torch.softmax(x_0_logits_part, dim=-1)
+                # multiply probabilities
+                # for mixture
+                x_0_probs[:, i:i+self.shape[0], 0] += torch.softmax(x_0_logits_part[0], dim=-1)#todo: [0] list trio
 
             # Mixture with Temperature
             x_0_probs = x_0_probs / x_0_probs.sum(-1, keepdim=True)
@@ -293,4 +270,4 @@ class AbsorbingDiffusion(Sampler):
             # update x_0 where anything has been masked
             x_t[changes] = x_0_hat[changes]
 
-        return x_t
+        return x_t.cpu().numpy()
