@@ -9,13 +9,13 @@ from torch.utils.data import Sampler
 from tqdm import tqdm
 
 import hparams
-from models import ConVormer, AbsorbingDiffusion, Transformer
+from models import ConVormer, AbsorbingDiffusion
 from utils import *
-from utils import cycle, SubseqSampler
 from utils.sampler_utils import get_samples
 from utils.train_utils import EMA, optim_warmup
 
 
+#DEBUG torch:
 # torch.backends.cudnn.benchmark = True
 
 def get_sampler(H):
@@ -101,7 +101,6 @@ def main(H, vis):
             train_stats = None
 
         if train_stats is not None:
-            losses, mean_losses, val_losses, elbo, H.steps_per_log
 
             losses = train_stats["losses"],
             mean_losses = train_stats["mean_losses"],
@@ -225,46 +224,47 @@ def main(H, vis):
 
         if step % H.steps_per_sample == 0 and step:
             log(f"Sampling step {step}")
-            samples = get_samples(H, ema_sampler if H.ema else sampler)
+            samples = get_samples(ema_sampler if H.ema else sampler, H.sample_steps)
             save_samples(samples, step, H.log_dir)
             vis_samples(vis, samples, step)
 
         if H.steps_per_eval and step % H.steps_per_eval == 0 and step:
-            # [[c_p, c_d], [v_p, v_d]] = evaluate_unconditional(train_loader, ema_sampler if H.ema else sampler, H)
-            # print(c_p, c_d, v_p, v_d)
-            # vis.line(
-            #     np.array([c_p]),
-            #     np.array([step]),
-            #     win='Pitch',
-            #     update='append',
-            #     name='consistency',
-            #     opts=dict(title='Con, Var Pitch')
-            # )
-            # vis.line(
-            #     np.array([v_p]),
-            #     np.array([step]),
-            #     win='Pitch',
-            #     update='append',
-            #     name='variance',
-            #     opts=dict(title='Con, Var Pitch')
-            # )
-            # vis.line(
-            #     np.array([c_d]),
-            #     np.array([step]),
-            #     win='Duration',
-            #     update='append',
-            #     name='consistency',
-            #     opts=dict(title='Con, Var Duration')
-            # )
-            # vis.line(
-            #     np.array([v_d]),
-            #     np.array([step]),
-            #     win='Duration',
-            #     update='append',
-            #     name='variance',
-            #     opts=dict(title='Con, Var Duration')
-            # )
-            # calculate validation loss
+            [[c_p, c_d], [v_p, v_d]] = evaluate(train_loader, ema_sampler if H.ema else sampler, H)
+            print(c_p, c_d, v_p, v_d)
+            vis.line(
+                np.array([c_p]),
+                np.array([step]),
+                win='Pitch',
+                update='append',
+                name='consistency',
+                opts=dict(title='Con, Var Pitch')
+            )
+            vis.line(
+                np.array([v_p]),
+                np.array([step]),
+                win='Pitch',
+                update='append',
+                name='variance',
+                opts=dict(title='Con, Var Pitch')
+            )
+            vis.line(
+                np.array([c_d]),
+                np.array([step]),
+                win='Duration',
+                update='append',
+                name='consistency',
+                opts=dict(title='Con, Var Duration')
+            )
+            vis.line(
+                np.array([v_d]),
+                np.array([step]),
+                win='Duration',
+                update='append',
+                name='variance',
+                opts=dict(title='Con, Var Duration')
+            )
+            #todo: add the stats above into stats?
+            #calculate validation loss
             valid_loss, valid_elbo, num_samples = 0.0, 0.0, 0
             log(f"Evaluating step {step}")
 

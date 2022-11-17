@@ -1,7 +1,3 @@
-import copy
-import itertools
-from statistics import NormalDist
-
 import itertools
 from statistics import NormalDist
 
@@ -10,9 +6,9 @@ from note_seq import quantize_note_sequence
 from note_seq import sequences_lib
 from tqdm import tqdm
 
-import hparams
-from utils import SubseqSampler, np_to_ns, log, get_sampler, load_model, EMA
-from utils.sampler_utils import get_samples
+from .data_utils import SubseqSampler
+from .log_utils import log
+from .sampler_utils import get_samples, np_to_ns
 
 N_SAMPLES = 256
 
@@ -70,28 +66,30 @@ def get_rand_dataset_subset(midi_data, size=1000):
     return midi_data[idx]
 
 
-def get_samples_for_eval(mode, dataset, size=1000):
-    sampler.n_samples = min(N_SAMPLES, size)
+def get_samples_for_eval(H, sampler, mode, dataset, size=1000):
     originals = get_rand_dataset_subset(dataset, size)
     if mode == 'unconditional':
         samples = []
         for _ in tqdm(range(int(np.ceil(size / H.n_samples)))):
-            sa = get_samples(ema_sampler if H.ema else sampler, 1024)
+            sampler.n_samples = min(N_SAMPLES, size - N_SAMPLES * len(samples))
+            sa = get_samples(sampler, 1024)
             samples.append(sa)
-        samples = np.stack(samples)
+        samples = np.concatenate(samples)
     elif mode == 'infilling':
         samples = originals.copy()
         samples[:, H.gap_start:H.gap_end] = np.array(H.codebook_size)
         for i in tqdm(range(int(np.ceil(size / H.n_samples)))):
-            samples[i * N_SAMPLES:(i + 1) * N_SAMPLES] = \
-                get_samples(ema_sampler if H.ema else sampler, 1024, x_T=samples[i * N_SAMPLES:(i + 1) * N_SAMPLES])
+            l = i * N_SAMPLES
+            u = min(len(samples), l + N_SAMPLES)
+            samples[l:u] = \
+                get_samples(sampler, 1024, x_T=samples[l:u])
     else:  # self
         samples = get_rand_dataset_subset(dataset, size)
 
     return np_to_ns(samples[:size]), np_to_ns(originals)
 
 
-def evaluate(eval_dataset_path, mode='unconditional', batches=100, evaluations_per_batch=10, batch_size=1000, notes=1024):
+def evaluate(H, sampler, eval_dataset_path, mode='unconditional', batches=100, evaluations_per_batch=10, batch_size=1000, notes=1024):
 
     if mode == 'infilling':
         if evaluations_per_batch != 1:
@@ -102,7 +100,7 @@ def evaluate(eval_dataset_path, mode='unconditional', batches=100, evaluations_p
     midi_data = SubseqSampler(midi_data, notes)
 
     for i in range(batches):
-        samples, originals = get_samples_for_eval(mode, midi_data, batch_size)
+        samples, originals = get_samples_for_eval(H, sampler, mode, midi_data, batch_size)
 
         CVs = []
         for e in range(evaluations_per_batch):
@@ -114,26 +112,3 @@ def evaluate(eval_dataset_path, mode='unconditional', batches=100, evaluations_p
 
         CVs = np.array(CVs)
         print(f"avg for samples {i}:", CVs.mean(0))
-
-
-if __name__ == '__main__':
-    H = hparams.HparamsAbsorbingConv('Lakh', 64)
-    H.n_samples = N_SAMPLES
-
-    H.gap_start = H.NOTES // 4
-    H.gap_end = (H.NOTES * 3) // 4
-
-    sampler = get_sampler(H).cuda()
-    load_step = 690000
-    sampler = load_model(sampler, H.sampler, load_step, H.load_dir).cuda()
-    sampler.eval()
-    ema = EMA(H.ema_beta)
-    ema_sampler = copy.deepcopy(sampler)
-
-    try:
-        ema_sampler = load_model(
-            ema_sampler, f'{H.sampler}_ema', load_step, H.load_dir)
-    except Exception as e:
-        ema_sampler = copy.deepcopy(sampler)
-
-    evaluate('data/lakh_melody_64_1MIO.npy', mode='infilling', batches=5, evaluations_per_batch=10, batch_size=1000)

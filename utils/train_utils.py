@@ -78,37 +78,3 @@ def evaluate_consistency_variance(targets, preds):
     variance = 1 - np.abs(OA_t.var(0) - OA_p.var(0)) / OA_t.var(0)
 
     return np.clip(consistency, 0, 1), np.clip(variance, 0, 1)
-
-
-def evaluate_unconditional(midi_data, sampler, H, evaluations=10, batch_size=1000):
-
-    converter = OneHotMelodyConverter()
-    to_ns = lambda x: converter.from_tensors(np.expand_dims(x[:, 0], 0))[0]
-
-    old_n_samples = sampler.n_samples
-    N_SAMPLES = 256
-    sampler.n_samples = N_SAMPLES
-
-    samples = []
-
-    for _ in tqdm(range(int(np.ceil(batch_size / N_SAMPLES)))):
-        sa = get_samples(H, sampler)
-        for s in sa:
-            samples.append(s)
-
-    sampler.n_samples = old_n_samples
-
-    samples = [to_ns(s) for s in samples[:batch_size]]
-    CVs = []
-
-    for e in range(evaluations):
-        idx = np.random.choice(midi_data.dataset.shape[0], batch_size)
-        originals = midi_data.dataset[idx]
-
-        originals = [to_ns(o) for o in originals]
-
-        c, v = evaluate_consistency_variance(originals, samples)
-        CVs.append((c, v))
-
-    CVs = np.array(CVs)
-    return CVs.mean(0)

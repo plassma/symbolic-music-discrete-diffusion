@@ -7,8 +7,8 @@ from tqdm import tqdm
 from .sampler import Sampler
 
 
-class AbsorbingDiffusion(Sampler):
-    def __init__(self, H, denoise_fn, mask_id, aux_weight=0.01):
+class GenerativeAdversarialAbsorbingDiffusion(Sampler):
+    def __init__(self, H, denoise_fn, discriminate_fn, mask_id):
         super().__init__(H)
 
         self.num_classes = H.codebook_size
@@ -17,19 +17,16 @@ class AbsorbingDiffusion(Sampler):
         self.num_timesteps = H.total_steps
 
         self._denoise_fn = denoise_fn
+        self._discriminate_fn = discriminate_fn
         self.n_samples = H.n_samples
         self.loss_type = H.loss_type
         self.mask_schedule = H.mask_schedule
-        self.aux_weight = aux_weight
-
-        self.register_buffer('mask_id', torch.tensor(mask_id))
-
-        assert self.mask_schedule in ['random', 'fixed']
-
-    def hack_init_loss_history(self):
         self.register_buffer('Lt_history', torch.zeros(self.num_timesteps+1))
         self.register_buffer('Lt_count', torch.zeros(self.num_timesteps+1))
         self.register_buffer('loss_history', torch.zeros(self.num_timesteps+1))
+        self.register_buffer('mask_id', torch.tensor(mask_id))
+
+        assert self.mask_schedule in ['random', 'fixed']
 
     def sample_time(self, b, device, method='uniform'):
         if method == 'importance':
@@ -86,6 +83,78 @@ class AbsorbingDiffusion(Sampler):
         x_0_ignore[torch.bitwise_not(mask)] = -1
         return x_t, x_0_ignore, mask
 
+    def _train_loss_adversarial(self, x_0, temp=1.):
+        self._discriminate_fn.eval()
+        self._denoise_fn.train()
+        b, device = x_0.size(0), x_0.device
+
+        # choose what time steps to compute loss at
+        t, pt = self.sample_time(b, device, 'uniform')
+
+        # make x noisy and denoise
+
+        if self.mask_schedule == 'random':
+            x_t, x_0_ignore, mask = self.q_sample(x_0=x_0, t=t)
+        elif self.mask_schedule == 'fixed':
+            x_t, x_0_ignore, mask = self.q_sample_mlm(x_0=x_0, t=t)
+
+        # sample p(x_0 | x_t)
+        x_0_hat_logits = self._denoise_fn(x_t)
+        x_0_hat_logits = [el for el in x_0_hat_logits]
+
+        x_0_hat_one_hot = [F.gumbel_softmax(l, temp, hard=True) for l in x_0_hat_logits]
+
+        pred = self._discriminate_fn(x_0_hat_one_hot)
+        targets = torch.zeros_like(pred)
+        targets[:, 1] = 1
+        loss = F.binary_cross_entropy(F.sigmoid(pred), targets)
+        acc = (pred.argmax(-1) == 0).sum().item() / pred.shape[0]
+
+        return loss.mean(), acc
+
+    def _train_loss_discriminator(self, x_0, temp=1.0):
+        self._discriminate_fn.train()
+        self._denoise_fn.eval()
+        b, device = x_0.size(0), x_0.device
+
+        # choose what time steps to compute loss at
+        t, pt = self.sample_time(b, device, 'uniform')
+
+        # make x noisy and denoise
+
+        if self.mask_schedule == 'random':
+            x_t, x_0_ignore, mask = self.q_sample(x_0=x_0, t=t)
+            #x_t_r, x_0_ignore_r, mask_r = self.q_sample(x_0=x_0, t=t - time_diff)
+        else:
+            raise NotImplemented()
+
+
+        with torch.no_grad():
+            x_0_logits = self._denoise_fn(x_t, t=t)
+        # scale by temperature
+        x_0_logits = [x / temp for x in x_0_logits]
+        x_0_dist = [dists.Categorical(
+            logits=x) for x in x_0_logits]
+        x_0_hat = torch.stack([xd.sample().long() for xd in x_0_dist], -1)
+        #x_t[changes] = x_0_hat[changes]
+        x_t = x_0_hat
+
+        x_t, x_0 = [F.one_hot(x_t[:, :, i], self.codebook_size[i]) for i in range(x_t.shape[-1])], [F.one_hot(x_0[:, :, i], self.codebook_size[i]) for i in range(x_0.shape[-1])]
+        pred_gen = self._discriminate_fn(x_t)
+        pred_real = self._discriminate_fn(x_0)
+
+        acc = ((pred_gen.cpu().detach().argmax(-1) == 0).sum() + (pred_real.cpu().detach().argmax(-1) == 1).sum()) / (b * 2)
+        targets_gen = torch.zeros_like(pred_gen)
+        targets_gen[:, 0] = 1
+        loss = F.binary_cross_entropy(torch.sigmoid(pred_gen), targets_gen, reduction='none').mean(-1)
+
+        weight = (1 - (t / self.num_timesteps))
+        loss = (weight * loss) / weight.mean()
+
+        loss += F.binary_cross_entropy(torch.sigmoid(pred_real), -(targets_gen - 1), reduction='none').mean(-1)
+
+        return loss.mean(), acc.item()
+
     def _train_loss(self, x_0):
         b, device = x_0.size(0), x_0.device
 
@@ -139,14 +208,10 @@ class AbsorbingDiffusion(Sampler):
 
         return loss.mean(), vb_loss.mean()
 
-    def sample(self, temp=1.0, sample_steps=None, x_T=None):
+    def sample(self, temp=1.0, sample_steps=None):
         b, device = self.n_samples, 'cuda'
-        if x_T is None:
-            x_T = torch.ones((b, *self.shape), device=device).long() * self.mask_id
-        b = x_T.shape[0]
-        unmasked = torch.zeros_like(x_T, device=device, dtype=torch.bool)
-        unmasked[x_T != self.mask_id] = True
-
+        x_t = torch.ones((b, *self.shape), device=device).long() * self.mask_id
+        unmasked = torch.zeros_like(x_t, device=device).bool()
         sample_steps = list(range(1, sample_steps + 1))
 
         for t in reversed(sample_steps):
@@ -154,21 +219,21 @@ class AbsorbingDiffusion(Sampler):
             t = torch.full((b,), t, device=device, dtype=torch.long)
 
             # where to unmask
-            changes = torch.rand(x_T.shape, device=device) < 1 / t.float().view(-1, *((1,) * (len(x_T.shape) - 1)))
+            changes = torch.rand(x_t.shape, device=device) < 1 / t.float().view(-1, *((1,) * (len(x_t.shape) - 1)))
             # don't unmask somewhere already unmasked
             changes = torch.bitwise_xor(changes, torch.bitwise_and(changes, unmasked))
             # update mask with changes
             unmasked = torch.bitwise_or(unmasked, changes)
 
-            x_0_logits = self._denoise_fn(x_T, t=t)
+            x_0_logits = self._denoise_fn(x_t, t=t)
             # scale by temperature
             x_0_logits = [x / temp for x in x_0_logits]
             x_0_dist = [dists.Categorical(
                 logits=x) for x in x_0_logits]
             x_0_hat = torch.stack([xd.sample().long() for xd in x_0_dist], -1)
-            x_T[changes] = x_0_hat[changes]
+            x_t[changes] = x_0_hat[changes]
 
-        return x_T
+        return x_t
 
     def sample_mlm(self, temp=1.0, sample_steps=None):
         b, device = self.n_samples, 'cuda'
@@ -202,10 +267,14 @@ class AbsorbingDiffusion(Sampler):
             elbo += cross_entropy_loss / t
         return elbo
 
-    def train_iter(self, x):
-        loss, vb_loss = self._train_loss(x)
-        stats = {'loss': loss, 'vb_loss': vb_loss}
+    def train_iter_generator(self, x, lam=0.5):
+        diff_loss, vb_loss = self._train_loss(x)
+        adv_loss, dis_acc = self._train_loss_adversarial(x)
+        stats = {'loss': diff_loss + lam * adv_loss, 'vb_loss': vb_loss, 'adv_loss': adv_loss, 'diff_loss': diff_loss}
         return stats
+
+    def train_iter_discriminator(self, x):
+        return self._train_loss_discriminator(x)
 
     @torch.no_grad()
     def sample_shape(self, shape, num_samples, time_steps=1000, step=1, temp=0.8):
