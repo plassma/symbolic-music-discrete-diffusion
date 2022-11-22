@@ -13,23 +13,25 @@ from preprocessing import OneHotMelodyConverter, TrioConverter
 
 def get_sampler(H):
 
-    if H.sampler == 'absorbing':
+    if H.model == 'transformer':
+        denoise_fn = Transformer(H).cuda()
+    else:
         denoise_fn = ConVormer(H).cuda()
 
-        denoise_fn = DataParallel(denoise_fn).cuda()
-        sampler = AbsorbingDiffusion(
-            H, denoise_fn, H.codebook_size)
+    denoise_fn = DataParallel(denoise_fn).cuda()
+    sampler = AbsorbingDiffusion(
+        H, denoise_fn, H.codebook_size)
 
     return sampler
 
 @torch.no_grad()
-def get_samples(sampler, sample_steps, x_T=None, temp=1.0):
+def get_samples(sampler, sample_steps, x_T=None, temp=1.0, b=None):
     sampler.eval()
 
     if x_T is not None and not torch.is_tensor(x_T):
         x_T = torch.tensor(x_T).to(next(sampler.parameters()).device)
 
-    result = sampler.sample(sample_steps=sample_steps, x_T=x_T, temp=temp)
+    result = sampler.sample(sample_steps=sample_steps, x_T=x_T, temp=temp, B=b)
     return result.cpu().numpy()
 
 def np_to_ns(x):

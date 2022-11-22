@@ -8,7 +8,7 @@ from .sampler import Sampler
 
 
 class AbsorbingDiffusion(Sampler):
-    def __init__(self, H, denoise_fn, mask_id, aux_weight=0.01):
+    def __init__(self, H, denoise_fn, mask_id):
         super().__init__(H)
 
         self.num_classes = H.codebook_size
@@ -17,19 +17,15 @@ class AbsorbingDiffusion(Sampler):
         self.num_timesteps = H.total_steps
 
         self._denoise_fn = denoise_fn
-        self.n_samples = H.n_samples
+        self.sampling_batch_size = H.sampling_batch_size
         self.loss_type = H.loss_type
         self.mask_schedule = H.mask_schedule
-        self.aux_weight = aux_weight
-
         self.register_buffer('mask_id', torch.tensor(mask_id))
 
-        assert self.mask_schedule in ['random', 'fixed']
-
-    def hack_init_loss_history(self):
         self.register_buffer('Lt_history', torch.zeros(self.num_timesteps+1))
         self.register_buffer('Lt_count', torch.zeros(self.num_timesteps+1))
         self.register_buffer('loss_history', torch.zeros(self.num_timesteps+1))
+        assert self.mask_schedule in ['random', 'fixed']
 
     def sample_time(self, b, device, method='uniform'):
         if method == 'importance':
@@ -139,14 +135,15 @@ class AbsorbingDiffusion(Sampler):
 
         return loss.mean(), vb_loss.mean()
 
-    def sample(self, temp=1.0, sample_steps=None, x_T=None):
-        b, device = self.n_samples, 'cuda'
+    def sample(self, temp=1.0, sample_steps=None, x_T=None, B=None):
+        b, device = self.sampling_batch_size, 'cuda'
+        if B is not None:
+            b = B
         if x_T is None:
             x_T = torch.ones((b, *self.shape), device=device).long() * self.mask_id
         b = x_T.shape[0]
         unmasked = torch.zeros_like(x_T, device=device, dtype=torch.bool)
         unmasked[x_T != self.mask_id] = True
-
         sample_steps = list(range(1, sample_steps + 1))
 
         for t in reversed(sample_steps):
@@ -171,7 +168,7 @@ class AbsorbingDiffusion(Sampler):
         return x_T
 
     def sample_mlm(self, temp=1.0, sample_steps=None):
-        b, device = self.n_samples, 'cuda'
+        b, device = self.sampling_batch_size, 'cuda'
         x_0 = torch.ones((b, np.prod(self.shape)), device=device).long() * self.mask_id
         sample_steps = np.linspace(1, self.num_timesteps, num=sample_steps).astype(np.long)
 

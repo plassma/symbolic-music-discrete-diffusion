@@ -1,68 +1,30 @@
-import argparse
+import copy
 import copy
 import time
 
 import numpy as np
 import torch
-from torch.nn import DataParallel
 from torch.utils.data import Sampler
 from tqdm import tqdm
 
-import hparams
-from models import ConVormer, AbsorbingDiffusion
+from hparams import get_sampler_hparams
 from utils import *
 from utils.sampler_utils import get_samples
 from utils.train_utils import EMA, optim_warmup
 
 
-#DEBUG torch:
-# torch.backends.cudnn.benchmark = True
-
-def get_sampler(H):
-
-    if H.sampler == 'absorbing':
-        denoise_fn = ConVormer(H)
-
-        denoise_fn = DataParallel(denoise_fn).cuda()
-        sampler = AbsorbingDiffusion(
-            H, denoise_fn, H.codebook_size)
-
-    return sampler
-
-
-def get_sampler_hparams(dataset, bars=64):
-    from hparams import apply_parser_values_to_H
-    hp = hparams.HparamsAbsorbingConv(dataset, bars)
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--amp", const=True, action="store_const", default=False)
-    parser.add_argument("--ema_beta", type=float, default=0.995)
-    parser.add_argument("--ema", const=True, action="store_const", default=False)
-    parser_args = parser.parse_args()
-    apply_parser_values_to_H(hp, parser_args)
-    return hp
-
-
-TRAIN_TEST_BATCH_SIZE = 16
-#todo: ask for permission to publish repo (copied)
-
 def main(H, vis):
-    midi_data = np.load('data/lakh_melody_64_1MIO.npy', allow_pickle=True)
+    midi_data = np.load(H.dataset_path, allow_pickle=True)
     midi_data = SubseqSampler(midi_data, H.NOTES)
 
     val_idx = int(len(midi_data) * H.validation_set_size)
-    train_loader, val_loader = torch.utils.data.DataLoader(midi_data[val_idx:],
-                                              batch_size=TRAIN_TEST_BATCH_SIZE,
-                                              shuffle=True, pin_memory=True, num_workers=32), torch.utils.data.DataLoader(midi_data[:val_idx],
-                                              batch_size=TRAIN_TEST_BATCH_SIZE,
-                                              shuffle=False)
+    train_loader = torch.utils.data.DataLoader(midi_data[val_idx:], batch_size=H.batch_size, shuffle=True,
+                                               pin_memory=True, num_workers=32)
+    val_loader = torch.utils.data.DataLoader(midi_data[:val_idx], batch_size=H.batch_size)
 
     log(f'Total train batches: {len(train_loader)}, eval: {len(val_loader)}')
 
-    log_start_step = 0
-    eval_start_step = 0
-
     sampler = get_sampler(H).cuda()
-
     optim = torch.optim.Adam(sampler.parameters(), lr=H.lr)
 
     if H.ema:
@@ -75,8 +37,9 @@ def main(H, vis):
     elbo = np.array([])
     val_elbos = np.array([])
     mean_losses = np.array([])
+    cons_var = np.array([]), np.array([]), np.array([]), np.array([])
     start_step = 0
-    log_start_step = 0
+
     if H.load_step > 0:
         start_step = H.load_step + 1
 
@@ -101,20 +64,14 @@ def main(H, vis):
             train_stats = None
 
         if train_stats is not None:
-
-            losses = train_stats["losses"],
-            mean_losses = train_stats["mean_losses"],
-            val_losses = train_stats["val_losses"],
+            losses = train_stats["losses"]
+            mean_losses = train_stats["mean_losses"]
+            val_losses = train_stats["val_losses"]
             val_elbos = train_stats["val_elbos"]
-            elbo = train_stats["elbo"],
+            elbo = train_stats["elbo"]
+            cons_var = train_stats["cons_var"]
             H.steps_per_log = train_stats["steps_per_log"]
             log_start_step = 0
-
-            losses = losses[0]
-            mean_losses = mean_losses[0]
-            val_losses = val_losses[0]
-            val_elbos = val_elbos[0]
-            elbo = elbo[0]
 
             # initialise plots
             vis.line(
@@ -135,24 +92,56 @@ def main(H, vis):
                 win='Val_loss',
                 opts=dict(title='Validation Loss')
             )
+            vis.line(
+                val_elbos,
+                list(range(H.steps_per_eval, start_step, H.steps_per_eval)),
+                win='Val_elbo',
+                opts=dict(title='Validation ELBO')
+            )
+            vis.line(
+                cons_var[0],
+                list(range(H.steps_per_eval, start_step, H.steps_per_eval)),
+                win='Pitch',
+                name='consistency',
+                opts=dict(title='Pitch')
+            )
+            vis.line(
+                cons_var[1],
+                list(range(H.steps_per_eval, start_step, H.steps_per_eval)),
+                win='Pitch',
+                name='variance',
+                update='append',
+                opts=dict(title='Pitch')
+            )
+            vis.line(
+                cons_var[2],
+                list(range(H.steps_per_eval, start_step, H.steps_per_eval)),
+                win='Duration',
+                name='consistency',
+                opts=dict(title='Duration')
+            )
+            vis.line(
+                cons_var[3],
+                list(range(H.steps_per_eval, start_step, H.steps_per_eval)),
+                win='Duration',
+                name='variance',
+                update='append',
+                opts=dict(title='Duration')
+            )
         else:
             log('No stats file found for loaded model, displaying stats from load step only.')
-            log_start_step = start_step
 
-    sampler.hack_init_loss_history()
     sampler = sampler.cuda()
 
     scaler = torch.cuda.amp.GradScaler()
     train_iterator = cycle(train_loader)
-    val_iterator = cycle(val_loader)
 
     log(f"Sampler params total: {sum(p.numel() for p in sampler.parameters())}")
-    log(sampler._denoise_fn.modules)
 
     for step in range(start_step, H.train_steps):
         sampler.train()
         if H.ema:
-            ema_sampler.train()#todo: is this already done anywhere?
+            ema_sampler.train()
         step_start_time = time.time()
         # lr warmup
         if H.warmup_iters:
@@ -224,47 +213,48 @@ def main(H, vis):
 
         if step % H.steps_per_sample == 0 and step:
             log(f"Sampling step {step}")
-            samples = get_samples(ema_sampler if H.ema else sampler, H.sample_steps)
+            samples = get_samples(ema_sampler if H.ema else sampler, H.sample_steps, b=H.show_samples)
             save_samples(samples, step, H.log_dir)
             vis_samples(vis, samples, step)
 
         if H.steps_per_eval and step % H.steps_per_eval == 0 and step:
-            [[c_p, c_d], [v_p, v_d]] = evaluate(train_loader, ema_sampler if H.ema else sampler, H)
-            print(c_p, c_d, v_p, v_d)
+            min_step = H.steps_per_eval
+            [[c_p, c_d], [v_p, v_d]] = evaluate(H, ema_sampler if H.ema else sampler)
+            cons_var = tuple(np.append(x, y) for x, y in zip(cons_var, [c_p, v_p, c_d, v_d]))
             vis.line(
                 np.array([c_p]),
                 np.array([step]),
                 win='Pitch',
-                update='append',
+                update=('append' if step > min_step else 'replace'),
                 name='consistency',
-                opts=dict(title='Con, Var Pitch')
+                opts=dict(title='Pitch')
             )
             vis.line(
                 np.array([v_p]),
                 np.array([step]),
                 win='Pitch',
-                update='append',
+                update=('append' if step > min_step else 'replace'),
                 name='variance',
-                opts=dict(title='Con, Var Pitch')
+                opts=dict(title='Pitch')
             )
             vis.line(
                 np.array([c_d]),
                 np.array([step]),
                 win='Duration',
-                update='append',
+                update=('append' if step > min_step else 'replace'),
                 name='consistency',
-                opts=dict(title='Con, Var Duration')
+                opts=dict(title='Duration')
             )
             vis.line(
                 np.array([v_d]),
                 np.array([step]),
                 win='Duration',
-                update='append',
+                update=('append' if step > min_step else 'replace'),
                 name='variance',
-                opts=dict(title='Con, Var Duration')
+                opts=dict(title='Duration')
             )
-            #todo: add the stats above into stats?
-            #calculate validation loss
+
+            # calculate validation loss
             valid_loss, valid_elbo, num_samples = 0.0, 0.0, 0
             log(f"Evaluating step {step}")
 
@@ -285,7 +275,7 @@ def main(H, vis):
                 np.array([valid_loss]),
                 np.array([step]),
                 win='Val_loss',
-                update=('append' if step > 0 else 'replace'),
+                update=('append' if step > min_step else 'replace'),
                 opts=dict(title='Validation Loss')
             )
             if H.sampler == 'absorbing':
@@ -293,7 +283,7 @@ def main(H, vis):
                     np.array([valid_elbo]),
                     np.array([step]),
                     win='Val_elbo',
-                    update=('append' if step > 0 else 'replace'),
+                    update=('append' if step > min_step else 'replace'),
                     opts=dict(title='Validation ELBO')
                 )
 
@@ -310,6 +300,7 @@ def main(H, vis):
                 'val_losses': val_losses,
                 'elbo': elbo,
                 'val_elbos': val_elbos,
+                'cons_var': cons_var,
                 'steps_per_log': H.steps_per_log,
                 'steps_per_eval': H.steps_per_eval,
             }
@@ -317,7 +308,7 @@ def main(H, vis):
 
 
 if __name__ == '__main__':
-    H = get_sampler_hparams('Lakh', 64)
+    H = get_sampler_hparams('train')
     vis = set_up_visdom(H)
 
     config_log(H.log_dir)
@@ -325,4 +316,3 @@ if __name__ == '__main__':
     log(f'Setting up training for {H.sampler}')
     start_training_log(H)
     main(H, vis)
-

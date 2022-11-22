@@ -17,13 +17,13 @@ if __name__ == '__main__':
 
     for step in range(200):
 
-        [[c_p, c_d], [v_p, v_d]] = [[1, 1], [0.5, 0.5]] #evaluate_unconditional(train_loader, ema_sampler if H.ema else sampler, H)
+        [[c_p, c_d], [v_p, v_d]] = [[np.random.rand(1), np.random.rand(1)], [np.random.rand(1), np.random.rand(1)]] #evaluate_unconditional(train_loader, ema_sampler if H.ema else sampler, H)
         print(c_p, c_d, v_p, v_d)
         vis.line(
             np.array([c_p]),
             np.array([step]),
             win='Pitch',
-            update='append',
+            update=('append' if step > 0 else 'replace'),
             name='consistency',
             opts=dict(title='Con, Var Pitch')
         )
@@ -31,7 +31,7 @@ if __name__ == '__main__':
             np.array([v_p]),
             np.array([step]),
             win='Pitch',
-            update='append',
+            update=('append' if step > 0 else 'replace'),
             name='variance',
             opts=dict(title='Con, Var Pitch')
         )
@@ -39,7 +39,7 @@ if __name__ == '__main__':
             np.array([c_d]),
             np.array([step]),
             win='Duration',
-            update='append',
+            update=('append' if step > 0 else 'replace'),
             name='consistency',
             opts=dict(title='Con, Var Duration')
         )
@@ -47,7 +47,7 @@ if __name__ == '__main__':
             np.array([v_d]),
             np.array([step]),
             win='Duration',
-            update='append',
+            update=('append' if step > 0 else 'replace'),
             name='variance',
             opts=dict(title='Con, Var Duration')
         )

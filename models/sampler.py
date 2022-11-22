@@ -8,7 +8,7 @@ class Sampler(nn.Module):
         self.latent_shape = H.latent_shape
         self.emb_dim = H.emb_dim
         self.codebook_size = H.codebook_size
-        self.n_samples = H.n_samples
+        self.sampling_batch_size = H.sampling_batch_size
 
     def train_iter(self, x, x_target, step):
         raise NotImplementedError()

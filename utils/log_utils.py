@@ -6,6 +6,7 @@ import logging
 from preprocessing.data import TrioConverter, OneHotMelodyConverter
 from note_seq import fluidsynth, note_sequence_to_midi_file
 
+
 def log(output):
     logging.info(output)
     print(output)

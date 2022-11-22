@@ -49,7 +49,7 @@ if __name__ == '__main__':
     theme, mask = prep_theme(32, 'data/long_eval.mid')#prep_sample(1024)
 
     H = hparams.HparamsAbsorbing('Lakh')
-    H.n_samples = N_SAMPLES
+    H.sampling_batch_size = N_SAMPLES
 
     sampler = get_sampler(H).cuda()
 

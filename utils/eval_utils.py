@@ -10,7 +10,6 @@ from .data_utils import SubseqSampler
 from .log_utils import log
 from .sampler_utils import get_samples, np_to_ns
 
-N_SAMPLES = 256
 
 def frame_statistics(bars):
     bars = list(itertools.chain(*bars))
@@ -67,48 +66,48 @@ def get_rand_dataset_subset(midi_data, size=1000):
 
 
 def get_samples_for_eval(H, sampler, mode, dataset, size=1000):
+    b = H.sampling_batch_size
     originals = get_rand_dataset_subset(dataset, size)
     if mode == 'unconditional':
         samples = []
-        for _ in tqdm(range(int(np.ceil(size / H.n_samples)))):
-            sampler.n_samples = min(N_SAMPLES, size - N_SAMPLES * len(samples))
-            sa = get_samples(sampler, 1024)
+        for _ in tqdm(range(int(np.ceil(size / H.sampling_batch_size)))):
+            sampler.sampling_batch_size = min(b, size - b * len(samples))
+            sa = get_samples(sampler, sample_steps=H.sample_steps, temp=H.temp)
             samples.append(sa)
         samples = np.concatenate(samples)
     elif mode == 'infilling':
         samples = originals.copy()
         samples[:, H.gap_start:H.gap_end] = np.array(H.codebook_size)
-        for i in tqdm(range(int(np.ceil(size / H.n_samples)))):
-            l = i * N_SAMPLES
-            u = min(len(samples), l + N_SAMPLES)
+        for i in tqdm(range(int(np.ceil(size / H.sampling_batch_size)))):
+            l = i * b
+            u = min(len(samples), l + b)
             samples[l:u] = \
-                get_samples(sampler, 1024, x_T=samples[l:u])
+                get_samples(sampler, sample_steps=H.sample_steps, x_T=samples[l:u], temp=H.temp)
     else:  # self
         samples = get_rand_dataset_subset(dataset, size)
 
     return np_to_ns(samples[:size]), np_to_ns(originals)
 
 
-def evaluate(H, sampler, eval_dataset_path, mode='unconditional', batches=100, evaluations_per_batch=10, batch_size=1000, notes=1024):
-
-    if mode == 'infilling':
-        if evaluations_per_batch != 1:
+def evaluate(H, sampler):
+    if H.mode == 'infilling':
+        if H.evals_per_batch != 1:
             log("Infilling only allows one evaluation per batch")
-        evaluations_per_batch = 1
+        H.evals_per_batch = 1
 
-    midi_data = np.load(eval_dataset_path, allow_pickle=True)
-    midi_data = SubseqSampler(midi_data, notes)
+    midi_data = np.load(H.dataset_path, allow_pickle=True)
+    midi_data = SubseqSampler(midi_data, H.NOTES)
 
-    for i in range(batches):
-        samples, originals = get_samples_for_eval(H, sampler, mode, midi_data, batch_size)
+    result = []
+    for i in range(H.num_evals):
+        samples, originals = get_samples_for_eval(H, sampler, H.mode, midi_data, H.eval_batch_size)
 
         CVs = []
-        for e in range(evaluations_per_batch):
+        for e in range(H.evals_per_batch):
             c, v = evaluate_consistency_variance(originals, samples)
             CVs.append((c, v))
-            print(c, v)
-            originals = get_rand_dataset_subset(midi_data, batch_size)
+            originals = get_rand_dataset_subset(midi_data, H.eval_batch_size)
             originals = np_to_ns(originals)
-
         CVs = np.array(CVs)
-        print(f"avg for samples {i}:", CVs.mean(0))
+        result.append(CVs.mean(0))
+    return np.array(result).mean(0)
