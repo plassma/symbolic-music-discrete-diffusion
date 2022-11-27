@@ -1,3 +1,3 @@
-from .transformer import Transformer, TransformerDiscriminator
+from .transformer import Transformer
 from .absorbing_diffusion import AbsorbingDiffusion
-from .convormer import ConVormer, ConVormerDiscriminator
+from .conv_transformer import ConVormer

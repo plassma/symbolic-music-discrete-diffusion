@@ -3,7 +3,6 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from models.big_bird_attention import BigBirdBlockSparseAttention
 
 
 class CausalSelfAttention(nn.Module):
@@ -63,17 +62,6 @@ class CausalSelfAttention(nn.Module):
         return y, present
 
 
-def get_big_bird_attention(H):
-    from types import SimpleNamespace
-    config = SimpleNamespace()
-    config.num_attention_heads = H.bert_n_head
-    config.num_random_blocks = 3
-    config.block_size = 64
-    config.max_position_embeddings = H.block_size
-    config.hidden_size = H.bert_n_emb
-    config.use_bias = False
-    return BigBirdBlockSparseAttention(config)
-
 class Block(nn.Module):
     """ an unassuming Transformer block """
 
@@ -81,7 +69,7 @@ class Block(nn.Module):
         super().__init__()
         self.ln1 = nn.LayerNorm(H.bert_n_emb)
         self.ln2 = nn.LayerNorm(H.bert_n_emb)
-        self.attn = CausalSelfAttention(H)#get_big_bird_attention(H)
+        self.attn = CausalSelfAttention(H)
         self.mlp = nn.Sequential(
             nn.Linear(H.bert_n_emb, 4 * H.bert_n_emb),
             nn.GELU(),  # nice
@@ -165,75 +153,5 @@ class Transformer(nn.Module):
             x = block(x)
         x = self.ln_f(x)
         logits = [h(x) for h in self.head]
-
-        return logits
-
-
-class TransformerDiscriminator(nn.Module):
-    """  the full GPT language model, with a context size of block_size """
-
-    def __init__(self, H):
-        super().__init__()
-
-        self.vocab_size = [h + 1 for h in H.codebook_size]
-        self.n_embd = H.bert_n_emb
-        self.block_size = H.block_size
-        self.n_layers = H.bert_n_layers
-        self.codebook_size = H.codebook_size
-        self.causal = H.sampler == 'autoregressive'
-        if self.causal:
-            self.vocab_size = H.codebook_size
-
-        self.tok_emb = nn.ParameterList([nn.Parameter(torch.zeros(1, vs, self.n_embd)) for vs in H.codebook_size])
-        #self.emb_red = nn.Linear(1536, 512)
-        self.pos_emb = nn.Parameter(torch.zeros(1, self.block_size, self.n_embd))
-        self.start_tok = nn.Parameter(torch.zeros(1, 1, self.n_embd))
-        self.drop = nn.Dropout(H.embd_pdrop)
-
-        # transformer
-        self.blocks = nn.Sequential(*[Block(H) for _ in range(self.n_layers)])
-        # decoder head
-        self.ln_f = nn.LayerNorm(self.n_embd)
-        self.head = nn.Sequential(nn.Linear(self.n_embd, self.n_embd // 4), nn.ReLU(),
-                                  nn.Linear(self.n_embd // 4, self.n_embd // 32), nn.ReLU(),
-                                  nn.Linear(self.n_embd // 32, 8), nn.ReLU(),
-                                  nn.Flatten(), nn.Linear(2048, 256),
-                                  nn.ReLU(), nn.Linear(256, 2))
-
-    def get_block_size(self):
-        return self.block_size
-
-    def _init_weights(self, module):
-        if isinstance(module, nn.LayerNorm):
-            module.bias.data.zero_()
-            module.weight.data.fill_(1.0)
-        else:
-            module.weight.data.normal_(mean=0.0, std=0.02)
-            if isinstance(module, nn.Linear) and module.bias is not None:
-                module.bias.data.zero_()
-
-    def forward(self, x_one_hot, t=None):
-        # each index maps to a (learnable) vector
-        token_embeddings = [x.float() @ t for x, t in zip(x_one_hot, self.tok_emb)]
-        token_embeddings = torch.cat(token_embeddings,-1)# todo: try other combinations of embeddings (concat?)
-        #token_embeddings = self.emb_red(token_embeddings)
-        if self.causal:
-            token_embeddings = torch.cat(
-                (self.start_tok.repeat(token_embeddings.size(0), 1, 1), token_embeddings),
-                dim=1
-            )
-
-        t = token_embeddings.shape[1]
-        assert t <= self.block_size, "Cannot forward, model block size is exhausted."
-        # each position maps to a (learnable) vector
-
-        position_embeddings = self.pos_emb[:, :t, :]
-
-        x = token_embeddings + position_embeddings
-        x = self.drop(x)
-        for block in self.blocks:
-            x = block(x)
-        x = self.ln_f(x)
-        logits = self.head(x)
 
         return logits

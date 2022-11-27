@@ -14,7 +14,7 @@ def add_common_args(parser):
 
 
 def add_train_args(parser):
-    add_eval_args(parser, 1)  # also adds common
+    add_eval_args(parser, 1)
 
     parser.add_argument("--ema_beta", type=float, default=0.995)
     parser.add_argument("--load_optim", const=True, action="store_const", default=False)
@@ -30,7 +30,6 @@ def add_train_args(parser):
 
 
 def add_eval_args(parser, num_evals=5):
-    add_common_args(parser)
     parser.add_argument("--mode", type=str, default='unconditional')
     parser.add_argument("--sampling_batch_size", type=int, default=256)
     parser.add_argument("--gap_start", type=int, default=-1)
@@ -40,30 +39,24 @@ def add_eval_args(parser, num_evals=5):
     parser.add_argument("--num_evals", type=int, default=num_evals)
 
 
-def apply_parser_values_to_H(H, args):
-    # NOTE default args in H will be overwritten by any default parser args
-    args = args.__dict__
-    for arg in args:
-        if args[arg] is not None:
-            H[arg] = args[arg]
-
-    return H
-
-
 def get_sampler_hparams(mode):
     parser = argparse.ArgumentParser()
+    add_common_args(parser)
     if mode == 'train':
         add_train_args(parser)
     elif mode == 'eval':
         add_eval_args(parser)
+    elif mode == 'sample':
+        pass
+
 
     parser_args = parser.parse_args()
 
     if parser_args.model == 'transformer':
-        H = HparamsAbsorbing(parser_args.bars, parser_args.tracks)
+        H = HparamsAbsorbing(parser_args)
     else:
-        H = HparamsAbsorbingConv(parser_args.bars, parser_args.tracks)
+        parser_args.model = 'conv_transformer'
+        H = HparamsAbsorbingConv(parser_args)
 
-    apply_parser_values_to_H(H, parser_args)
 
     return H

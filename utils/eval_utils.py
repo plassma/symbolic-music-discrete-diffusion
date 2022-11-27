@@ -13,14 +13,13 @@ from .sampler_utils import get_samples, np_to_ns
 
 def frame_statistics(bars):
     bars = list(itertools.chain(*bars))
-    stats = lambda x: NormalDist(np.mean(x), np.std(x) + 1e-6)
+    stats = lambda x: NormalDist(np.mean(x), np.std(x) + 1e-6) if len(x) else NormalDist(1, 1e-6)
     return stats([n.pitch for n in bars]), stats([n.quantized_end_step - n.quantized_start_step for n in bars])
 
 
 def framewise_overlap_areas(ns, width=4, hop=2):
     if not len(ns.notes):
-        return [np.nan, np.nan]
-
+        return [0, 0]
     qns = quantize_note_sequence(ns, 4)
     steps_per_bar = sequences_lib.steps_per_bar_in_quantized_sequence(qns)
     assert steps_per_bar == 16.
@@ -50,7 +49,6 @@ def framewise_overlap_areas(ns, width=4, hop=2):
 def evaluate_consistency_variance(targets, preds):
     OA_t = [framewise_overlap_areas(t) for t in targets]
     OA_p = [framewise_overlap_areas(p) for p in preds]
-    OA_t, OA_p = [oa for oa in OA_t if not np.isnan(oa).any()], [oa for oa in OA_p if not np.isnan(oa).any()]
     OA_t, OA_p = np.stack(OA_t), np.stack(OA_p)
 
 

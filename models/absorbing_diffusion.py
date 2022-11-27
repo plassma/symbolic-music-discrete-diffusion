@@ -135,7 +135,7 @@ class AbsorbingDiffusion(Sampler):
 
         return loss.mean(), vb_loss.mean()
 
-    def sample(self, temp=1.0, sample_steps=None, x_T=None, B=None):
+    def sample(self, temp=1.0, sample_steps=None, x_T=None, B=None, progress_handler=None):
         b, device = self.sampling_batch_size, 'cuda'
         if B is not None:
             b = B
@@ -148,6 +148,8 @@ class AbsorbingDiffusion(Sampler):
 
         for t in reversed(sample_steps):
             print(f'Sample timestep {t:4d}', end='\r')
+            if progress_handler:
+                progress_handler((len(sample_steps) - t) / len(sample_steps))
             t = torch.full((b,), t, device=device, dtype=torch.long)
 
             # where to unmask
