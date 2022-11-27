@@ -15,7 +15,24 @@ def loadfile(filename):
     fileobj.close()
     return str
 
-def add_audio(tensor):
+DUMMY_PLAYER = """
+            <audio controls>
+                <source type="audio/wav">
+                Your browser does not support the audio tag.
+            </audio>
+        """
+
+class SelectionArea:
+    def __init__(self, x=-1, y=-1):
+        self.x, self.y = x, y
+        self.t_x, t_y = -1, -1
+    def close(self, x, y):
+        self.t_x = x
+        self.t_y = y
+        return x > -1 and y > -1
+
+
+def update_audio(tensor, element):
     import scipy.io.wavfile  # type: ignore
     import tempfile
     audiofile = os.path.join(
@@ -31,33 +48,48 @@ def add_audio(tensor):
     assert mimetype is not None, 'unknown audio type: %s' % extension
 
     bytestr = loadfile(audiofile)
-    html = ui.html("""
+    element.content = ("""
             <audio controls>
                 <source type="audio/%s" src="data:audio/%s;base64,%s">
                 Your browser does not support the audio tag.
             </audio>
         """ % (mimetype, mimetype, base64.b64encode(bytestr).decode('utf-8')))
-    ui.update(html)
-    return html
+    element.update()
+    return element
 
 
-class DrawableSample(object):
+def get_styles():
+    return open('utils/dirty_hacks.html').read()
+
+class DrawableSample():
     def __init__(self, tensor):
         self.WIDTH = 4096
-        self.HEIGHT = 2048
-        self.TRACK_OFFSET = 300
-        self.scale = 3
+        self.HEIGHT = 800
+        self.DRUMS = 9
+        self.scale = 4
+        self.TRACK_OFFSET = self.scale * 90
         self.tensor = tensor
-        self.bitmap = np.ones((self.WIDTH, self.HEIGHT, 3), dtype=np.int8) * 255
+        self.bitmap = np.ones((self.HEIGHT, self.WIDTH, 3), dtype=np.int8) * 255
 
-    def draw_melody(self, track):
-        s = 5
-        if track < 2:
-            y_off = track * self.TRACK_OFFSET
-            for i, pitch in enumerate(self.tensor[:, track]):
-                self.bitmap[y_off + pitch * self.scale: y_off + pitch * self.scale + s, i * self.scale: i * self.scale + s] = 0
+    def draw_melody(self):
+        colors = [(255, 0, 0), (0, 0, 255), (0, 0, 0)]
+        for track in range(self.tensor.shape[1]):
+            s = 5
+            y_off = (track + 1) * self.TRACK_OFFSET
+            if track < 2:
+                for i, pitch in enumerate(self.tensor[:, track]):
+                    self.bitmap[y_off - pitch * self.scale - s:y_off - pitch * self.scale, i * self.scale: i * self.scale + s] = colors[track]
+            else:
+                drums_tensor = self.tensor[:, track]
+                drum_bits = np.array([np.binary_repr(p).zfill(10) for p in drums_tensor])
 
-    def to_src_string(self):
+                for time, drum_tensor in enumerate(drum_bits):
+                    for i, bit in enumerate(drum_tensor):
+                        y_drum = track * self.TRACK_OFFSET + i * s
+                        if bit != '0':
+                            self.bitmap[y_drum: y_drum + s, time * self.scale: time * self.scale + s] = colors[track]
+
+    def to_base64_src_string(self):
         image = Image.fromarray(self.bitmap.astype(np.int8), mode="RGB")
         buffered = BytesIO()
         image.save(buffered, format="JPEG")

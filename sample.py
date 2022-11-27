@@ -9,12 +9,14 @@ from typing import Callable
 
 import nicegui.globals
 import torch
+from nicegui.events import MouseEventArguments
 
+import utils.ui_utils
 from utils import get_sampler, load_model, EMA
 from hparams import get_sampler_hparams
 from nicegui import ui
 from note_seq import midi_to_note_sequence
-from utils.ui_utils import add_audio, DrawableSample
+from utils.ui_utils import update_audio, DrawableSample, get_styles, SelectionArea
 from utils.log_utils import sample_audio
 from utils.sampler_utils import ns_to_np, get_samples, np_to_ns
 from PIL import Image
@@ -23,6 +25,7 @@ import numpy as np
 async def io_bound(callback: Callable, *args: any, **kwargs: any):
     '''Makes a blocking function awaitable; pass function as first parameter and its arguments as the rest'''
     return await asyncio.get_event_loop().run_in_executor(None, functools.partial(callback, *args, **kwargs))
+
 
 async def process_midi(e):
 
@@ -33,15 +36,16 @@ async def process_midi(e):
     npy = ns_to_np(ns, 16).outputs[0]
 
     drawable_sample = DrawableSample(npy)
-    drawable_sample.draw_melody(0)
+    drawable_sample.draw_melody()
 
-    ii = ui.interactive_image(drawable_sample.to_src_string())
+    left_ii.source = drawable_sample.to_base64_src_string()
+    left_ii.update()
 
     x_T = np.zeros((ui_state.n_samples, H.NOTES, 3), dtype=np.long)
     x_T[:, :npy.shape[0], 0] = npy[:, 0]
 
     audios = sample_audio(x_T)
-    add_audio(audios[0])
+    update_audio(audios[0], left_audio)
 
     #mask
     x_T[:, :, 1] = 90
@@ -49,7 +53,7 @@ async def process_midi(e):
     x_T[:, npy.shape[0]:, 0] = 90
 
     def progress_handler(progress):
-        ui_state.progress = progress
+        ui_state.progress = round(progress, 2)
 
     def _get_samples():
         return get_samples(ema_sampler, int(ui_state.timesteps), torch.tensor(x_T, dtype=torch.long).cuda(), progress_handler=progress_handler)
@@ -58,18 +62,23 @@ async def process_midi(e):
     audios = sample_audio(samples)
 
     drawable_sample = DrawableSample(samples[0])
-    drawable_sample.draw_melody(0)
-    drawable_sample.draw_melody(1)
+    drawable_sample.draw_melody()
 
-    ii.source = drawable_sample.to_src_string()
-    ii.update()
+    right_ii.source = drawable_sample.to_base64_src_string()
+    right_ii.update()
 
     ui_state.audios = audios
 
     for a in ui_state.audios:
-        add_audio(a)
+        update_audio(a, right_audio)
 
-
+def log_mouse_events(e: MouseEventArguments):
+    if e.type == 'mousedown':
+        selection_area.x = e.image_x
+        selection_area.y = e.image_y
+    elif e.type == 'mouseup':
+        if selection_area.close(e.image_x, e.image_y):
+            print(selection_area.x, selection_area.y, selection_area.t_x, selection_area.t_y)
 class UIState:
     n_samples: int = 1
     progress: float = 0.
@@ -88,17 +97,35 @@ if __name__ == '__main__':
 
     ui_state = UIState()
 
-    ui.label('Welcome to SCHmUBERT')
+    ui.add_head_html(get_styles())
 
     progress_ui = ui.linear_progress()
     progress_ui.bind_value_from(ui_state, 'progress')
 
-    ui.upload(on_upload=process_midi)
-    with ui.column():
-        ui.toggle([2**i for i in range(4)], value=1).bind_value(ui_state, 'n_samples')
-        with ui.row().classes('w-full'):
-            ui.slider(value=1024, min=100, max=1024).bind_value_to(ui_state, 'timesteps')
-            ui.label().bind_text_from(ui_state, 'timesteps', lambda x: str(int(x)))
+    with ui.expansion('Expand!', icon='work').classes('w-full'):
+        ui.upload(on_upload=process_midi)
+        #ui.toggle([2**i for i in range(4)], value=1).bind_value(ui_state, 'n_samples')
+        #with ui.row().classes('w-full'):
+        ui.slider(value=256, min=100, max=1024).bind_value_to(ui_state, 'timesteps')
+        ui.label().bind_text_from(ui_state, 'timesteps', lambda x: str(int(x)))
 
-    ui.run(reload=False, port=8081, )
+    selection_area = SelectionArea()
+
+    with ui.row():
+        with ui.column():
+            left_ii = ui.interactive_image(on_mouse=log_mouse_events, events=['mousedown', 'mouseup'])
+            left_ii.classes('scrollable-pianoroll')
+            with ui.row():
+                left_play = ui.button("play").classes("play-left")
+                left_stop = ui.button("stop").classes("stop-left")
+                left_audio = ui.html(utils.ui_utils.DUMMY_PLAYER)
+        with ui.column():
+            right_ii = ui.interactive_image(on_mouse=log_mouse_events, events=['mousedown', 'mouseup'])
+            right_ii.classes('scrollable-pianoroll')
+            with ui.row():
+                right_play = ui.button("play").classes("play-right")
+                right_stop = ui.button("stop").classes("stop-right")
+                right_audio = ui.html(utils.ui_utils.DUMMY_PLAYER)
+
+    ui.run(reload=False, port=8081, title='Welcome to SCHmUBERT')
 
