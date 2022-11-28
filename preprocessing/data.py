@@ -18,16 +18,15 @@ import collections
 import copy
 import functools
 import itertools
-import logging
 
-from preprocessing import drum_pipelines
-from preprocessing import melody_pipelines
 import note_seq
+import numpy as np
 from note_seq import chords_lib
 from note_seq import drums_encoder_decoder
 from note_seq import sequences_lib
-import numpy as np
 
+from preprocessing import drum_pipelines
+from preprocessing import melody_pipelines
 
 PIANO_MIN_MIDI_PITCH = 21
 PIANO_MAX_MIDI_PITCH = 108

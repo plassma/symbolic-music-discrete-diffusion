@@ -83,6 +83,11 @@ def samples_2_noteseq(np_samples):
 
 
 def sample_audio(samples):
+    samples = samples.copy()
+    if len(samples.shape) < 3:
+        samples = np.expand_dims(samples, 0)
+    samples[samples == 90] = 0
+    samples[samples == 512] = 0
     samples = samples_2_noteseq(samples)
     return [fluidsynth(s, 44100., 'soundfont.sf2') for s in samples]
 

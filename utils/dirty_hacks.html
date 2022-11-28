@@ -10,10 +10,11 @@
             max-width: none;
         }
         audio {
-            visibility: hidden;
+            /*visibility: hidden;*/
         }
 </style>
 <script>
+
     function syncScroll() {
       let a = $(".scrollable-pianoroll").first();
       let b = $(".scrollable-pianoroll").last()
@@ -27,34 +28,32 @@
         a.scrollLeft(b.scrollLeft());
     });
   }
-  let old_region = [{}, {}];
-  function drawLine(ctx, x, pos){
-    let old_r_x = Math.max(0, x-10);
-    old_region[pos] = {'x': old_r_x, 'data': (ctx.getImageData(old_r_x, 0, 20, 800))};
+  function drawLine(ctx, x){
     ctx.beginPath();
     ctx.moveTo(x, 0);
     ctx.lineTo(x, 800);
     ctx.stroke();
-  }
-  function removeLastLine(ctx, pos){
-      if (old_region[pos].data)
-        ctx.putImageData(old_region[pos].data, old_region[pos].x, 0)
+  };
 
-  }
+  const clear = (ctx) => {
+            ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+            if(ctx.image_storage){
+                ctx.drawImage(ctx.image_storage, 0, 0);
+            }
+        };
   const sleep = ms => new Promise(r => setTimeout(r, ms));
 
   async function moveCursor(ctx, i, pos) {
-      removeLastLine(ctx, pos);
+      clear(ctx);
       drawLine(ctx, i, pos);
   }
 
   let stop_cursors = false;
 
-  async function runCursor(ctx, pos){
+  async function runCursor(ctx, pos, audio){
       let moveDuration = 0;
-      let audio = $("audio")[pos];
-      const DURATION = 128
-      const STEPS = 4096
+      const DURATION = 128;
+      const STEPS = 4096;
       const PERIOD = DURATION * 1000 / STEPS;
 
       for(let i = 0; i <STEPS; i++) {
@@ -64,18 +63,20 @@
           moveDuration = performance.now() - beforeMove
           await sleep(PERIOD - moveDuration);
           if(stop_cursors) {
-              removeLastLine(ctx, pos);
               break;
           }
       }
   }
-  function addPlayListener(query, ctx, pos) {
-
+  function addPlayListener(query, c, pos) {
+      let ctx1 = c[pos].getContext('2d');
+      let ctx2 = c[(pos + 1) % 2].getContext('2d');
       $(query).click(() => {
           stop_cursors = false;
-          runCursor(ctx, pos);
-          $("audio")[pos].play();
-          $("audio")[pos + 1 % 2].pause();
+          audio = $("audio")[pos];
+          runCursor(ctx1, pos, audio);
+          runCursor(ctx2, (pos + 1) % 2, audio)
+          audio.play();
+          $("audio")[(pos + 1) % 2].pause();
       });
   }
 
@@ -84,27 +85,27 @@
           $("audio")[pos].pause();
           $("audio")[pos].currentTime=0;
           stop_cursors = true;
+          let cans = $(".scrollable-pianoroll > canvas");
+          clear(cans[0].getContext('2d'));
+          clear(cans[1].getContext('2d'));
       })
   }
 
   function addSelectionListener(c1, i)
     {
-        const ctx1 = c1.getContext('2d');
-        oldImg = ctx1.getImageData(0, 0, c1.width, c1.height);
+        const ctx = c1.getContext('2d');
         const drawSelection = (e) => {
-            oldImg = ctx1.getImageData(0, 0, c1.width, c1.height);
-            ctx1.strokeStyle = "#000";
-            ctx1.beginPath();
-            ctx1.rect(origin.x, origin.y, e.offsetX - origin.x, e.offsetY - origin.y);
-            ctx1.stroke();
+            ctx.strokeStyle = "#000";
+            ctx.beginPath();
+            ctx.rect(origin.x, origin.y, e.offsetX - origin.x, e.offsetY - origin.y);
+            ctx.stroke();
         };
 
         const clear = () => {
-            if(oldImg){
-                ctx1.clearRect(0, 0, c1.width, c1.height);
-                if(window.images && window.images[i]){
-                    ctx1.drawImage(window.images[i], 0, 0);
-                }
+            ctx.clearRect(0, 0, c1.width, c1.height);
+            if(ctx.image_storage){
+                ctx.drawImage(ctx.image_storage, 0, 0);
+
             }
         };
 
@@ -119,7 +120,7 @@
         c1.onmousedown = e => {
             origin = {x: e.offsetX, y: e.offsetY};
             clear();
-            drawLine(ctx1, e.offsetX, i);
+            drawLine(ctx, e.offsetX, i);
             $("audio")[i].currentTime=e.offsetX * 128 / 4096;
         };
         c1.onmouseup = e => {
@@ -127,20 +128,20 @@
             render(e);
         };
         c1.onmousemove = render;
+        clear();
     }
-
 
   window.addEventListener('DOMContentLoaded', (event) => {
       console.log('DOM fully loaded and parsed');
       syncScroll();
 
       let c = $(".scrollable-pianoroll > canvas");
-      let ctx = c[0].getContext('2d');
+
       addSelectionListener(c[0], 0);
-      addPlayListener(".play-left", ctx, 0);
-      ctx = c[1].getContext('2d');
+      addPlayListener(".play-left", c, 0);
+
       addSelectionListener(c[1], 1);
-      addPlayListener(".play-right", ctx, 1);
+      addPlayListener(".play-right", c, 1);
 
       addStopListener(".stop-left", 0);
       addStopListener(".stop-right", 1);

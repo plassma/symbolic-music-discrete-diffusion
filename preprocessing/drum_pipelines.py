@@ -14,12 +14,10 @@
 
 """Data processing pipelines for drum tracks."""
 
-import statistics
-from note_seq import drums_lib
 from note_seq import DrumTrack
-from note_seq import events_lib
 from note_seq import sequences_lib
-from note_seq.protobuf import music_pb2
+
+import preprocessing.statistics as statistics
 
 
 def extract_drum_tracks(quantized_sequence,
