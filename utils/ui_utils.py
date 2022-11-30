@@ -48,27 +48,31 @@ class SelectionArea:
         return  x_contained and self.y <= y and self.t_y >= y + h
 
 def update_audio(tensor, element):
-    import scipy.io.wavfile  # type: ignore
+    import scipy.io.wavfile
     import tempfile
     audiofile = os.path.join(
         tempfile.gettempdir(),
         '%s.wav' % next(tempfile._get_candidate_names()))
-    tensor = np.int16(tensor / np.max(np.abs(tensor)) * 32767)
-    scipy.io.wavfile.write(audiofile, 44100, tensor)
+    if len(tensor):
+        tensor = np.int16(tensor / np.max(np.abs(tensor)) * 32767)
+        scipy.io.wavfile.write(audiofile, 44100, tensor)
 
 
-    extension = audiofile.split('.')[-1].lower()
-    mimetypes = {'wav': 'wav', 'mp3': 'mp3', 'ogg': 'ogg', 'flac': 'flac'}
-    mimetype = mimetypes.get(extension)
-    assert mimetype is not None, 'unknown audio type: %s' % extension
-
-    bytestr = loadfile(audiofile)
+        extension = audiofile.split('.')[-1].lower()
+        mimetypes = {'wav': 'wav', 'mp3': 'mp3', 'ogg': 'ogg', 'flac': 'flac'}
+        mimetype = mimetypes.get(extension)
+        assert mimetype is not None, 'unknown audio type: %s' % extension
+        bytestr = loadfile(audiofile)
+        bytestr = base64.b64encode(bytestr).decode('utf-8')
+    else:
+        bytestr = ""
+        mimetype = ""
     element.content = ("""
             <audio controls>
                 <source type="audio/%s" src="data:audio/%s;base64,%s">
                 Your browser does not support the audio tag.
             </audio>
-        """ % (mimetype, mimetype, base64.b64encode(bytestr).decode('utf-8')))
+        """ % (mimetype, mimetype, bytestr))
     element.update()
     return element
 
@@ -79,32 +83,50 @@ def get_styles():
 class DrawableSample():
     def __init__(self, tensor=None):
         if tensor is None:
-            tensor = np.ones((1024, 3), np.long) * (90, 90, 512)
+            tensor = np.ones((1024, 3), int) * (90, 90, 512)
         self.WIDTH = 4096
         self.HEIGHT = 800
+        self.DOT_SIZE = 5
         self.DRUMS = 9
         self.scale = 4
         self.TRACK_OFFSET = self.scale * 90
-        self.tensor = tensor
+        self.tensors = [tensor]
+        self.index = 0
+        self.colors = [(255, 0, 0), (0, 0, 255), (0, 0, 0)]
+
+    def get_coords(self, i, track, pitch):
+        y_off = (track + 1) * self.TRACK_OFFSET + self.DOT_SIZE * track * 2
+
+        return (i * self.scale), (y_off - pitch * self.scale)
+
+    def undo(self):
+        if self.index > 0:
+            self.index -= 1
+            return True
+        return False
+
+    @property
+    def tensor(self):
+        return self.tensors[self.index]
 
     def draw_melody(self):
         self.bitmap = np.ones((self.HEIGHT, self.WIDTH, 3), dtype=np.int8) * 255
-        colors = [(255, 0, 0), (0, 0, 255), (0, 0, 0)]
+
         for track in range(self.tensor.shape[1]):
-            s = 5
-            y_off = (track + 1) * self.TRACK_OFFSET + s * (1 + track)
+            s = self.DOT_SIZE
             if track < 2:
                 for i, pitch in enumerate(self.tensor[:, track]):
-                    self.bitmap[y_off - pitch * self.scale - s:y_off - pitch * self.scale, i * self.scale: i * self.scale + s] = colors[track]
+                    x, y = self.get_coords(i, track, pitch)
+                    self.bitmap[y:y+s, x: x + s] = self.colors[track]
             else:
                 drums_tensor = self.tensor[:, track]
                 drum_bits = np.array([np.binary_repr(p).zfill(10) for p in drums_tensor])
 
                 for time, drum_tensor in enumerate(drum_bits):
                     for i, bit in enumerate(drum_tensor):
-                        y_drum = track * self.TRACK_OFFSET + (i + 2)* s
+                        y_drum = track * self.TRACK_OFFSET + (i + 3) * s
                         if bit != '0':
-                            self.bitmap[y_drum: y_drum + s, time * self.scale: time * self.scale + s] = colors[track]
+                            self.bitmap[y_drum: y_drum + s, time * self.scale: time * self.scale + s] = self.colors[track]
         return self
 
     def to_base64_src_string(self):
@@ -115,12 +137,13 @@ class DrawableSample():
         return "data:image/png;base64," + img_str.decode('utf-8')
 
     def mask_selection_area(self, area: SelectionArea):
+        self.next_tensor()
         for track in range(self.tensor.shape[1]):
-            s = 5
-            y_off = (track + 1) * self.TRACK_OFFSET + s * (1 + track)
+            s = self.DOT_SIZE
             if track < 2:
                 for i, pitch in enumerate(self.tensor[:, track]):
-                    if (i * self.scale, y_off - pitch * self.scale - s, s, s) in area:
+                    x, y = self.get_coords(i, track, pitch)
+                    if (x, y, s, s) in area:
                         self.tensor[i, track] = 90
             else:
                 drums_tensor = self.tensor[:, track]
@@ -130,4 +153,17 @@ class DrawableSample():
                         self.tensor[time, track] = 512
 
     def mask_track(self, track):
+        self.next_tensor()
         self.tensor[:, track] = 90 if track < 2 else 512
+
+    def update_tensor(self, new_masked_tensor):
+        self.next_tensor()
+        self.tensors[self.index] = new_masked_tensor.copy()
+        self.tensors[self.index][self.tensors[self.index] == 90] = self.tensors[self.index - 1][self.tensors[self.index] == 90]
+        self.tensors[self.index][self.tensors[self.index] == 512] = self.tensors[self.index - 1][self.tensors[self.index] == 512]
+
+    def next_tensor(self):
+        if len(self.tensors) <= self.index + 1:
+            self.tensors.append(None)
+        self.index += 1
+        self.tensors[self.index] = self.tensors[self.index - 1].copy()

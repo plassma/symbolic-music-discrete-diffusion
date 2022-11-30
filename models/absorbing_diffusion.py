@@ -144,6 +144,10 @@ class AbsorbingDiffusion(Sampler):
         b = x_T.shape[0]
         unmasked = torch.zeros_like(x_T, device=device, dtype=torch.bool)
         unmasked[x_T != self.mask_id] = True
+
+        if sample_steps:
+            sample_steps = min(sample_steps, (~unmasked).sum())
+
         sample_steps = list(range(1, sample_steps + 1))
 
         for t in reversed(sample_steps):
