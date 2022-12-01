@@ -1,12 +1,20 @@
 # SCHmUBERT
 ### a Symbolic Creative Harmonic music Unmasking Bidirectional Encoder Representation Transformer
 
+
+
+https://user-images.githubusercontent.com/5902684/205120516-1c77b026-fa5c-4a0e-be68-1d1345e716be.mp4
+
+
+
 Code for 2022 ISMIR LBD
 
 ## Installation
 I run my experiments in Python 3.10, with all dependencies managed by Conda.
 
 ```conda env create -f env.yml```
+
+Note that for all experiments, a soundfont-file called 'soundfont.sf2' (not included) must be located in the root-directory of the project.
 
 ## Prepare Dataset
 
@@ -64,8 +72,11 @@ https://user-images.githubusercontent.com/5902684/205109877-49158518-321c-4533-9
 
 https://user-images.githubusercontent.com/5902684/205113067-3e208b03-959d-419c-90f7-147ff4fc438a.mp4
 
-
-
 https://user-images.githubusercontent.com/5902684/205115137-d0742f99-a13e-4377-b056-175f37cea23f.mp4
+
+## Model Weights
+
+Model weights for the Conv_Transformer model trained on the Lakh-MIDI Dataset can be obtained [here](https://drive.google.com/file/d/1o719d4SOBMdjb3Gv_t6gxXVipekPdYhd/view?usp=share_link).
+Extract the 'logs' folder to the project root, and set the ```load_step``` accordingly (180000 for melody, 140000 for trio).
 
 
