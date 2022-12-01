@@ -35,7 +35,6 @@ class HparamsAbsorbing(HparamsBase):
         self.steps_per_update_ema = 10
         self.steps_per_sample = 5000
         self.load_step = 0
-        self.visdom_port = 8097
         self.sampling_batch_size = 24
         self.bert_n_emb = 512
         self.bert_n_head = 16

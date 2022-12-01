@@ -267,6 +267,4 @@ if __name__ == '__main__':
                 right_mask = ui.button("mask", on_click=on_mask_click)
                 right_audio = ui.html(utils.ui_utils.DUMMY_PLAYER)
                 ui.link('Download MIDI', 'midi/right')
-    PORT = 8080
-    print(PORT)
-    ui.run(reload=False, port=PORT, title='SCHmUBERT')
+    ui.run(reload=False, port=H.port, title='SCHmUBERT')

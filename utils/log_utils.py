@@ -123,15 +123,4 @@ def log_stats(step, stats):
 
 
 def set_up_visdom(H):
-    server = H.visdom_server
-    try:
-        if server:
-            vis = visdom.Visdom(server=server, port=H.visdom_port)
-        else:
-            vis = visdom.Visdom(port=H.visdom_port)
-        return vis
-
-    except Exception:
-        log_str = "Failed to set up visdom server - aborting"
-        print(log_str, level="error")
-        raise RuntimeError(log_str)
+    vis = visdom.Visdom(port=H.port)
