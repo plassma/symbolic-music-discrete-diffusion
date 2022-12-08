@@ -275,11 +275,6 @@ Vue.component("pianoroll", {
       download.href = url;
       download.download = 'schmubert.mid';
 
-     this.t = 0;
-      if (this.$props.jp_props.options.notes.t > this.t) {
-        this.notes.active = this.$props.jp_props.options.notes.tensor;
-        this.t = this.$props.jp_props.options.notes.t;
-      }
 
     }
 
@@ -436,6 +431,13 @@ Vue.component("pianoroll", {
       clearInterval(connectInterval);
     };
     const connectInterval = setInterval(sendConnectEvent, 100);
+
+    this.t = 0;
+    if (this.$props.jp_props.options.notes.t > this.t) {
+      this.notes.active = this.$props.jp_props.options.notes.tensor;
+      this.t = this.$props.jp_props.options.notes.t;
+    }
+
   },
  updated() {
 

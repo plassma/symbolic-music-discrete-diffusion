@@ -77,8 +77,7 @@ def update_audio(tensor, element):
 
 
 def get_styles():
-    #all_js_str = [f'<script>{open(f).read()}</script>' for f in list(Path("utils/frontend/MIDIjs/").rglob("*.js"))]
-    return open('utils/frontend/dirty_hacks.html').read() + open('utils/frontend/jsmidigen.html').read()# + ''.join(all_js_str)
+    return open('utils/frontend/dirty_hacks.html').read()
 
 class DrawableSample():
     def __init__(self, tensor=None):
