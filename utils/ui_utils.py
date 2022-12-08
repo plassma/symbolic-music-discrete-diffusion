@@ -1,9 +1,7 @@
-from io import BytesIO
-
-from PIL import Image
-from nicegui import ui
 import base64
 import os
+from pathlib import Path
+
 import numpy as np
 
 
@@ -47,6 +45,7 @@ class SelectionArea:
             return x_contained
         return  x_contained and self.y <= y and self.t_y >= y + h
 
+
 def update_audio(tensor, element):
     import scipy.io.wavfile
     import tempfile
@@ -78,7 +77,8 @@ def update_audio(tensor, element):
 
 
 def get_styles():
-    return open('utils/dirty_hacks.html').read()
+    #all_js_str = [f'<script>{open(f).read()}</script>' for f in list(Path("utils/frontend/MIDIjs/").rglob("*.js"))]
+    return open('utils/frontend/dirty_hacks.html').read() + open('utils/frontend/jsmidigen.html').read()# + ''.join(all_js_str)
 
 class DrawableSample():
     def __init__(self, tensor=None):
@@ -108,33 +108,6 @@ class DrawableSample():
     @property
     def tensor(self):
         return self.tensors[self.index]
-
-    def draw_melody(self):
-        self.bitmap = np.ones((self.HEIGHT, self.WIDTH, 3), dtype=np.int8) * 255
-
-        for track in range(self.tensor.shape[1]):
-            s = self.DOT_SIZE
-            if track < 2:
-                for i, pitch in enumerate(self.tensor[:, track]):
-                    x, y = self.get_coords(i, track, pitch)
-                    self.bitmap[y:y+s, x: x + s] = self.colors[track]
-            else:
-                drums_tensor = self.tensor[:, track]
-                drum_bits = np.array([np.binary_repr(p).zfill(10) for p in drums_tensor])
-
-                for time, drum_tensor in enumerate(drum_bits):
-                    for i, bit in enumerate(drum_tensor):
-                        y_drum = track * self.TRACK_OFFSET + (i + 3) * s
-                        if bit != '0':
-                            self.bitmap[y_drum: y_drum + s, time * self.scale: time * self.scale + s] = self.colors[track]
-        return self
-
-    def to_base64_src_string(self):
-        image = Image.fromarray(self.bitmap.astype(np.int8), mode="RGB")
-        buffered = BytesIO()
-        image.save(buffered, format="JPEG")
-        img_str = base64.b64encode(buffered.getvalue())
-        return "data:image/png;base64," + img_str.decode('utf-8')
 
     def mask_selection_area(self, area: SelectionArea):
         self.next_tensor()

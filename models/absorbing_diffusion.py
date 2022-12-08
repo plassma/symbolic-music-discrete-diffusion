@@ -149,11 +149,16 @@ class AbsorbingDiffusion(Sampler):
             sample_steps = min(sample_steps, (~unmasked).sum())
 
         sample_steps = list(range(1, sample_steps + 1))
+        last_progress = 0
 
         for t in reversed(sample_steps):
+
+            p = int(100 * (len(sample_steps) - t) / len(sample_steps))
+            if progress_handler and p > last_progress:
+                last_progress = p
+                progress_handler(p)
+
             print(f'Sample timestep {t:4d}', end='\r')
-            if progress_handler:
-                progress_handler((len(sample_steps) - t) / len(sample_steps))
             t = torch.full((b,), t, device=device, dtype=torch.long)
 
             # where to unmask
