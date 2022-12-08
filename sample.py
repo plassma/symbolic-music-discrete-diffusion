@@ -54,8 +54,6 @@ async def on_upload(e):
         ui.notify("interpreting as melody")
         npy = ns_to_np(ns, bars, 'melody').outputs[0]
 
-    ns = np_to_ns(np.expand_dims(npy, 0))
-    note_sequence_to_midi_file(ns[0], 'test.mid')
 
     x_T = np.zeros((ui_state.n_samples, H.NOTES, 3), dtype=int)
 
