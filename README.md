@@ -1,13 +1,4 @@
 # SCHmUBERT
-### a Symbolic Creative Harmonic music Unmasking Bidirectional Encoder Representation Transformer
-
-
-
-https://user-images.githubusercontent.com/5902684/205120516-1c77b026-fa5c-4a0e-be68-1d1345e716be.mp4
-
-
-
-Code for 2022 ISMIR LBD
 
 ## Installation
 I run my experiments in Python 3.10, with all dependencies managed by Conda.
