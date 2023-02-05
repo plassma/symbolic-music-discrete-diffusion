@@ -1,15 +1,86 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+    <script src="https://cdn.jsdelivr.net/npm/@magenta/music@^1.23.1"></script>
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.1/jquery.min.js"></script>
     <meta charset="UTF-8">
     <title>SCHmUBERT</title>
 </head>
 <body>
-    Test Player:
+<script>
+    const ORIGINAL_PROGRAMS = [0, 33];
+    const N_SAMPLES = 1000;
+    let PROGRAMS = [...ORIGINAL_PROGRAMS];
+    (async  () =>
+    {
+        const SF_URL = 'https://storage.googleapis.com/magentadata/js/soundfonts/sgm_plus';
+        const SAMPLES_BASE_URL = 'https://raw.githubusercontent.com/plassma/symbolic-music-discrete-diffusion/master/samples/';
 
-    <audio controls>
-      <source src="https://raw.githubusercontent.com/plassma/symbolic-music-discrete-diffusion/master/samples/selected_rendered/melody_0.wav" type="audio/wav">
-      <source src="https://raw.githubusercontent.com/plassma/symbolic-music-discrete-diffusion/master/samples/selected_rendered/trio_0.wav" type="audio/wav">
-    </audio>
+        const popSelects = async () => {
+            const response = await (await fetch(SF_URL + '/soundfont.json')).json();
+            const instruments = Object.values(response.instruments);
+            const selects = $("select.select");
+            for (let i = 0; i < selects.length; i++) {
+                selects[i].innerHTML = instruments.map((e, j) => `<option ${j === PROGRAMS[i] ? 'selected' : ''}>${e}</option>`).join('');
+                $(selects[i]).change(() => console.log(PROGRAMS[i] = $(selects[i])[0].selectedIndex));
+            }
+            let sel_sample = $("#sel-sample")[0];
+            sel_sample.innerHTML = [...Array(N_SAMPLES).keys()].map(v => `<option>${v}</option>`).join('');
+        };
+        popSelects();
+
+        let ns = await mm.urlToNoteSequence('https://raw.githubusercontent.com/plassma/symbolic-music-discrete-diffusion/master/samples/samples_trio/sample_0.mid');
+        const viz = new mm.Visualizer(ns, document.getElementById('viz-notes'));
+        const player = new mm.SoundFontPlayer(SF_URL, undefined,
+            undefined, undefined, {
+                run: (note) => viz.redraw(note),
+                stop: () => {
+                    console.log('done');
+                }
+            })
+
+        play = async () => {
+            let dataset = $("#sel-set").val();
+            let tracks = $("#sel-tracks").val();
+            let idx = $('#sel-sample').val();
+            let ns = await mm.urlToNoteSequence(SAMPLES_BASE_URL + dataset + '/' + tracks + `/sample_${idx}.mid`);
+
+            for(let i = 0; i < ns.notes.length; i++){
+                for(let j = 0; j < 2; j++) {
+                    if (ns.notes[i].program === ORIGINAL_PROGRAMS[j]) {
+                        ns.notes[i].program = PROGRAMS[j];
+                    }
+                }
+            }
+
+            viz.noteSequence = ns;
+            player.start(ns)
+        };
+        console.log("fin");
+    })();
+</script>
+Test Player:
+
+<button onclick="play()"> play</button>
+<canvas id="viz-notes" width="1024" height="300"></canvas>
+<div style="display: block">
+    <div>
+        <select class="select select-melody"></select>
+        <select class="select select-bass"></select>
+    </div>
+    <div>
+        <select id="sel-set">
+            <option>generated</option>
+            <option>train</option>
+            <option>valid</option>
+        </select>
+        <select id="sel-tracks">
+            <option>melody</option>
+            <option>trio</option>
+        </select>
+        <select id="sel-sample">
+        </select>
+    </div>
+</div>
 </body>
 </html>
