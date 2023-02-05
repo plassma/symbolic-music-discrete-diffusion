@@ -16,30 +16,7 @@
         const SF_URL = 'https://storage.googleapis.com/magentadata/js/soundfonts/sgm_plus';
         const SAMPLES_BASE_URL = 'https://raw.githubusercontent.com/plassma/symbolic-music-discrete-diffusion/master/samples/';
 
-        const popSelects = async () => {
-            const response = await (await fetch(SF_URL + '/soundfont.json')).json();
-            const instruments = Object.values(response.instruments);
-            const selects = $("select.select");
-            for (let i = 0; i < selects.length; i++) {
-                selects[i].innerHTML = instruments.map((e, j) => `<option ${j === PROGRAMS[i] ? 'selected' : ''}>${e}</option>`).join('');
-                $(selects[i]).change(() => console.log(PROGRAMS[i] = $(selects[i])[0].selectedIndex));
-            }
-            let sel_sample = $("#sel-sample")[0];
-            sel_sample.innerHTML = [...Array(N_SAMPLES).keys()].map(v => `<option>${v}</option>`).join('');
-        };
-        popSelects();
-
-        let ns = await mm.urlToNoteSequence('https://raw.githubusercontent.com/plassma/symbolic-music-discrete-diffusion/master/samples/samples_trio/sample_0.mid');
-        const viz = new mm.Visualizer(ns, document.getElementById('viz-notes'));
-        const player = new mm.SoundFontPlayer(SF_URL, undefined,
-            undefined, undefined, {
-                run: (note) => viz.redraw(note),
-                stop: () => {
-                    console.log('done');
-                }
-            })
-
-        play = async () => {
+        updateNoteseq = async() => {
             let dataset = $("#sel-set").val();
             let tracks = $("#sel-tracks").val();
             let idx = $('#sel-sample').val();
@@ -54,14 +31,50 @@
             }
 
             viz.noteSequence = ns;
+            viz.redraw();
+            return ns;
+        }
+
+        const popSelects = async () => {
+            const response = await (await fetch(SF_URL + '/soundfont.json')).json();
+            const instruments = Object.values(response.instruments);
+            const selects = $("select.select");
+            for (let i = 0; i < selects.length; i++) {
+                selects[i].innerHTML = instruments.map((e, j) => `<option ${j === PROGRAMS[i] ? 'selected' : ''}>${e}</option>`).join('');
+                $(selects[i]).change(() => console.log(PROGRAMS[i] = $(selects[i])[0].selectedIndex));
+            }
+            let sel_sample = $("#sel-sample")[0];
+            sel_sample.innerHTML = [...Array(N_SAMPLES).keys()].map(v => `<option>${v}</option>`).join('');
+            $("#sel-sample").change(updateNoteseq);
+            $("#sel-tracks").change(updateNoteseq);
+            $("#sel-set").change(updateNoteseq);
+        };
+        popSelects();
+
+        let ns = await mm.urlToNoteSequence('https://raw.githubusercontent.com/plassma/symbolic-music-discrete-diffusion/master/samples/generated/melody/sample_0.mid');
+        const viz = new mm.PianoRollCanvasVisualizer(ns, document.getElementById('viz-notes'));
+        const player = new mm.SoundFontPlayer(SF_URL, undefined,
+            undefined, undefined, {
+                run: (note) => viz.redraw(note),
+                stop: () => {
+                    console.log('done');
+                }
+            })
+
+        play = async () => {
+            let ns = await updateNoteseq();
             player.start(ns)
         };
-        console.log("fin");
+        stop = async () => {
+            player.stop();
+        }
+
     })();
 </script>
 Test Player:
 
-<button onclick="play()"> play</button>
+<button onclick="play()">play</button>
+<button onclick="stop()">stop</button>
 <canvas id="viz-notes" width="1024" height="300"></canvas>
 <div style="display: block">
     <div>
