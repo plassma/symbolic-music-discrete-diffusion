@@ -3,7 +3,8 @@
 ## Samples
 
 Samples in MIDI format can be found in the samples folder.
-You can also explore them in your browser: https://anonymous.4open.science/w/symbolic-music-discrete-diffusion-DC51/
+[You can also explore them in your browser](https://anonymous.4open.science/w/symbolic-music-discrete-diffusion-DC51/)
+(open in new tab if page not found)
 
 ## Installation
 I run my experiments in Python 3.10, with all dependencies managed by Conda.
