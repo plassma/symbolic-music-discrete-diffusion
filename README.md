@@ -52,8 +52,6 @@ The GUI supports:
   * masking area selected with mouse (mask button at the bottom)
   * playing with cursor indicating exact position in left and right visualization
 
-Note: This sampling-tool was coded in very little time, and mainly coded for the LBD-Video.
-It certainly needs to be reworked, but works if handled carefully.
 
 ## Samples
 
