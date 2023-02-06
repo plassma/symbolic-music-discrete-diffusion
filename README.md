@@ -57,7 +57,7 @@ It certainly needs to be reworked, but works if handled carefully.
 ## Samples
 
 Samples in MIDI format can be found in the samples folder.
-You can also explore them in your browser: https://plassma.github.io/symbolic-music-discrete-diffusion/
+You can also explore them in your browser: https://anonymous.4open.science/w/symbolic-music-discrete-diffusion-DC51/
 ## Model Weights
 
 Model weights for the Conv_Transformer model trained on the Lakh-MIDI Dataset can be obtained [here](https://drive.google.com/file/d/1o719d4SOBMdjb3Gv_t6gxXVipekPdYhd/view?usp=share_link).
