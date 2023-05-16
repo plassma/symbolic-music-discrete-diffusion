@@ -4,13 +4,17 @@ import torch.distributions as dists
 from torch.nn import DataParallel
 
 # from .log_utils import save_latents, log
-from models import Transformer, AbsorbingDiffusion, ConVormer
+from models import Transformer, AbsorbingDiffusion, ConVormer, HierarchTransformer, UTransformer
 from preprocessing import OneHotMelodyConverter, TrioConverter
 
 
 def get_sampler(H):
     if H.model == 'transformer':
         denoise_fn = Transformer(H).cuda()
+    elif H.model == 'hierarch_transformer':
+        denoise_fn = HierarchTransformer(H).cuda()
+    elif H.model == 'U_transformer':
+        denoise_fn = UTransformer(H).cuda()
     else:
         denoise_fn = ConVormer(H).cuda()
 
@@ -35,7 +39,7 @@ def get_samples(sampler, sample_steps, x_T=None, temp=1.0, b=None, progress_hand
 def np_to_ns(x):
     if x.shape[-1] == 1:
         converter = OneHotMelodyConverter()
-        return converter.from_tensors(x.squeeze())
+        return converter.from_tensors(x.squeeze(-1))
     elif x.shape[-1] == 3:
         converter = TrioConverter()
         return converter.from_tensors(x)

@@ -76,7 +76,8 @@
           border-top: none;
         }
 </style>
-<script src="https://cdn.jsdelivr.net/npm/@magenta/music@^1.23.1"></script>
+<!--<script src="https://cdn.jsdelivr.net/npm/@magenta/music@^1.23.1"></script>-->
+<script src="http://localhost:8097/sgm_plus/music@^1.23.1.js"></script>
 
 <script>
 
@@ -87,30 +88,32 @@
             return val === b[index]});
       }*/
 
-    function initMaskTensor(len=1024, tracks=3) {
+    function copy(x) {
+        return JSON.parse(JSON.stringify(x));
+    }
+
+    class TensorStore {
+
+        initMaskTensor(len=1024, tracks=3) {
         let result = [];
         for(let i = 0; i < len; i++) {
             let a = [];
             for(let t = 0; t < tracks; t++) {
-                a.push(t < 2 ? 90 : 512);
+                a.push(this.mask_ids[t]);
             }
             result.push(a);
         }
         return result;
     }
 
-    function copy(x) {
-        return JSON.parse(JSON.stringify(x));
-    }
-
-    class TensorStore {
         static diffActive = [];
-        constructor(capacity=8) {
+        constructor(mask_ids, capacity=8) {
+            this.mask_ids = mask_ids;
             this.i = 0;
             this.tensors = [];
             let f = TensorStore.diffActive.length === 0;
             for (let i = 0; i < capacity; i++) {
-                this.tensors.push([initMaskTensor()]);
+                this.tensors.push([this.initMaskTensor()]);
                 if(f) TensorStore.diffActive.push(false);
             }
             if (f) TensorStore.diffActive[this.i] = true;
@@ -147,7 +150,7 @@
         set active(tensor) {
             for(let i = 0; i < this.active.length; i++)
                 for (let t = 0; t < this.active[0].length; t++)
-                    if(this.active[i][t] === 90 || this.active[i][t] === 512)
+                    if(this.active[i][t] === this.mask_ids[t])
                         this.active[i][t] = tensor[i][t];
         }
 

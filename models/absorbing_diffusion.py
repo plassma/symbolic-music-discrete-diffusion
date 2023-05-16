@@ -20,6 +20,7 @@ class AbsorbingDiffusion(Sampler):
         self.sampling_batch_size = H.sampling_batch_size
         self.loss_type = H.loss_type
         self.mask_schedule = H.mask_schedule
+        self.sample_schedule = H.sample_schedule
         self.register_buffer('mask_id', torch.tensor(mask_id))
 
         self.register_buffer('Lt_history', torch.zeros(self.num_timesteps+1))
@@ -55,9 +56,14 @@ class AbsorbingDiffusion(Sampler):
         # randomly set token to mask with probability t/T
         x_t, x_0_ignore = x_0.clone(), x_0.clone()
 
+        mask_track_flag = np.random.randint(0, 1, [len(self.mask_id)])
+        if mask_track_flag.sum() == 0:
+            mask_track_flag[:] = 1
+
         mask = torch.rand_like(x_t.float()) < (t.view(-1, *((1,) * (len(x_t.shape) - 1))).float() / self.num_timesteps)
         for i in range(len(self.mask_id)):
-            x_t[:, :, i][mask[:, :, i]] = self.mask_id[i]
+            if mask_track_flag[i]:
+                x_t[:, :, i][mask[:, :, i]] = self.mask_id[i]
         x_0_ignore[torch.bitwise_not(mask)] = -1
         return x_t, x_0_ignore, mask
 
@@ -174,6 +180,73 @@ class AbsorbingDiffusion(Sampler):
             x_0_dist = [dists.Categorical(
                 logits=x) for x in x_0_logits]
             x_0_hat = torch.stack([xd.sample().long() for xd in x_0_dist], -1)
+            x_T[changes] = x_0_hat[changes]
+
+        return x_T
+
+    def guided_sample(self, guide, eta=1, temp=1.0, sample_steps=None, x_T=None, B=None):
+        b, device = self.sampling_batch_size, 'cuda'
+        if B is not None:
+            b = B
+        if x_T is None:
+            x_T = torch.ones((b, *self.shape), device=device).long() * self.mask_id
+        b = x_T.shape[0]
+
+
+        unmasked = torch.zeros_like(x_T, device=device, dtype=torch.bool)
+        unmasked[x_T != self.mask_id] = True
+
+        if sample_steps:
+            sample_steps = min(sample_steps, (~unmasked).sum())
+
+        sample_steps = list(range(1, sample_steps + 1))
+
+        for t in reversed(sample_steps):
+            print(f'Sample timestep {t:4d}', end='\r')
+
+            with torch.no_grad():
+                x_0_logits = self._denoise_fn(x_T, t=t)
+            # scale by temperature
+            x_0_logits = [x / temp for x in x_0_logits]
+            x_0_probs = [F.softmax(x, -1) for x in x_0_logits]
+
+            n = min(2, len(x_0_probs))
+
+            for i in range(n): x_0_probs[i].requires_grad = True
+
+            guide_loss = [guide(x_0_probs[i]) for i in range(n)]
+            #print(guide_loss[0].item())
+            #guide_loss = [g.log() for g in guide_loss] todo: logits require log?
+
+            for i in range(n):
+                guide_loss[i].mean().backward()
+                #print("loss:", guide_loss[i].mean().item())
+
+            #grads = torch.stack([x_0_p.grad.data[0, i, x_0_hat[0, i, 0]] for i in range(x_0_hat.shape[1])])#x_0_p.grad.data[0].gather(-1, x_0_hat[:, :, 0])#todo: repair for batches
+
+            grad = [x_0_probs[i].grad.data for i in range(n)]
+            x_0_probs = [F.softmax(x_0_logits[i], -1) for i in range(n)]
+
+            for i in range(n):
+                x_0_probs[i] -= grad[i] * eta #/(grad[i].max() - grad[i].min())
+                x_0_probs[i] = x_0_probs[i].clamp(0, 1)
+
+            x_0_dist = [dists.Categorical(probs=p) for p in x_0_probs]
+
+            x_0_hat = torch.stack([xd.sample().long() for xd in x_0_dist], -1)
+
+            # where to unmask
+            t = torch.full((b,), t, device=device, dtype=torch.long)
+            unmask_rand = torch.rand(x_T.shape, device=device)
+            #unmask_rand[:, :, 0] = grads
+            changes = unmask_rand < 1 / t.float().view(-1, *((1,) * (len(x_T.shape) - 1)))
+
+
+            # don't unmask somewhere already unmasked
+            changes = torch.bitwise_xor(changes, torch.bitwise_and(changes, unmasked))
+            # update mask with changes
+            unmasked = torch.bitwise_or(unmasked, changes)
+
             x_T[changes] = x_0_hat[changes]
 
         return x_T

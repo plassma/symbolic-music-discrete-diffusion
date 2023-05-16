@@ -68,7 +68,7 @@ Vue.component("pianoroll", {
     this.other_pianoroll_id = this.$props.jp_props.id === 14 ? 16:14;
     this.canvas = $("#"+this.$props.jp_props.id + " canvas")[0];
     const ctx = this.canvas.getContext('2d');
-    this.player = new mm.SoundFontPlayer('https://storage.googleapis.com/magentadata/js/soundfonts/sgm_plus', );
+    this.player = new mm.SoundFontPlayer('http://127.0.0.1:8097/sgm_plus');//new mm.SoundFontPlayer('https://storage.googleapis.com/magentadata/js/soundfonts/sgm_plus');
     this.playing = false;
 
     $("#"+this.$props.jp_props.id + " .play-button").click(() => {
@@ -111,19 +111,19 @@ Vue.component("pianoroll", {
     });
     $("#"+this.$props.jp_props.id + " .mask-melody-button").click(() => {
       this.origin = null;
-      this.selectedArea = {x: 0, y: 0, w: 4096, h: 91 * SCALE};
+      this.selectedArea = {x: 0, y: 0, w: 4096, h: (this.$props.jp_props.options.mask_ids[0] + 1)* SCALE};
       this.mask();
       return false;
     });
     $("#"+this.$props.jp_props.id + " .mask-bass-button").click(() => {
       this.origin = null;
-      this.selectedArea = {x: 0, y: 92 * SCALE, w: 4096, h: 91 * SCALE};
+      this.selectedArea = {x: 0, y: (this.$props.jp_props.options.mask_ids[0] + 2) * SCALE, w: 4096, h: (this.$props.jp_props.options.mask_ids[0] + 1) * SCALE};
       this.mask();
       return false;
     });
     $("#"+this.$props.jp_props.id + " .mask-drums-button").click(() => {
       this.origin = null;
-      this.selectedArea = {x: 0, y: 735, w: 4096, h: 80};
+      this.selectedArea = {x: 0, y: 2 * TRACK_OFFSET + 3*SCALE, w: 4096, h: 80};
       this.mask();
       return false;
     });
@@ -154,8 +154,7 @@ Vue.component("pianoroll", {
     let PROGRAMS = [1, 33, 0];
     let DRUM_PITCHES = [36, 38, 42, 46, 45, 48, 50, 49, 51];
     const popSelects = async () => {
-      const response =
-      await (await fetch(`https://storage.googleapis.com/magentadata/js/soundfonts/sgm_plus/soundfont.json`)).json();
+      const response = await (await fetch(`http://127.0.0.1:8097/sgm_plus/soundfont.json`)).json();
       const instruments = Object.values(response.instruments);
       const selects = $("#" + this.$props.jp_props.id + " .select");
       for(let i = 0; i < selects.length; i++) {
@@ -182,9 +181,10 @@ Vue.component("pianoroll", {
     $("#" + this.$props.jp_props.id + " .select-drums").change(instChangeHandler(2, 'drums'));
 
     const SCALE = 4;
-    const TRACK_OFFSET = SCALE * 90;
+    const TRACK_OFFSET = SCALE * this.$props.jp_props.options.mask_ids[0];
+    const DRUM_OFFSET = 5 * SCALE;
     const CAPACITY = 8;
-    this.notes = new TensorStore(CAPACITY);
+    this.notes = new TensorStore(this.$props.jp_props.options.mask_ids, CAPACITY);
 
     const activateTab = (i) => {
       $("#" + this.$props.jp_props.id + " button").removeClass("active");
@@ -202,7 +202,7 @@ Vue.component("pianoroll", {
 
     this.markDiffActive();
 
-    for(let i = 0; i < CAPACITY; i++) {//
+    for(let i = 0; i < CAPACITY; i++) {
       $("#"+this.$props.jp_props.id + " .tab").append(
           '<button className="tablinks">' + (i + 1) + '</button>');
       $("#"+this.$props.jp_props.id + " .tab button").last().mousedown((e) => {
@@ -240,24 +240,25 @@ Vue.component("pianoroll", {
           totalQuantizedSteps: this.notes.active.length,
           totalTime:128
           };
+      const MAGENTA_PITCH_OFFSET = 19;
       for(let t = 0; t < this.notes.active[0].length; t++) {
         let pp = 0;
         let pt = 0
         for (let i = 0; i < this.notes.active.length; i++) {
           let p = this.notes.active[i][t];
+          if (p === this.$props.jp_props.options.mask_ids[t]) p = 0;
           if(t === 2) {
-            if (p === 512) p = 0;
             const bits = convertDecimalToBinary(p);
             for(let b = 0; b < bits.length; b++) {
               if(bits[b]){
-                result.notes.push({pitch: DRUM_PITCHES[b], quantizedStartStep: i, quantizedEndStep: i + 1, program: PROGRAMS[t], isDrum: true, velocity: 64});
+                result.notes.push({pitch: DRUM_PITCHES[b], quantizedStartStep: i, quantizedEndStep: i + 1, program: PROGRAMS[t], isDrum: true, velocity: 63});
               }
             }
           } else {
-            if(p === 90) p = 0;
             if (p) {
               if (pp > 1) {
-                result.notes.push({pitch: pp + 19, quantizedStartStep: pt, quantizedEndStep: i, program: PROGRAMS[t], velocity: 64});
+                let v = t > 0 ? 80:63;
+                result.notes.push({pitch: pp + MAGENTA_PITCH_OFFSET, quantizedStartStep: pt, quantizedEndStep: i, program: PROGRAMS[t], velocity: v});
               }
               pp = p;
               pt = i;
@@ -282,7 +283,7 @@ Vue.component("pianoroll", {
       if(! this.selectedArea) return false;
       let x_contained = this.selectedArea.x <= i * SCALE && this.selectedArea.x + this.selectedArea.w >= (i + 1) * SCALE;
       if (!x_contained) return false;
-      if(t === 2) return x_contained && this.selectedArea.y + this.selectedArea.h >= 735;
+      if(t === 2) return x_contained && this.selectedArea.y + this.selectedArea.h >= t * TRACK_OFFSET + DRUM_OFFSET;
       let [_, y] = getCoords(i, t);
       return this.selectedArea.y <= y && this.selectedArea.y + this.selectedArea.h >= y + SCALE;
     };
@@ -314,7 +315,7 @@ Vue.component("pianoroll", {
               const bits = convertDecimalToBinary(this.notes.active[i][t]);
               for(let b = 0; b < bits.length; b++) {
                 if(bits[b]) {
-                  let y = t * TRACK_OFFSET + (b + 3) * SCALE;
+                  let y = t * TRACK_OFFSET + DRUM_OFFSET + (b) * SCALE;
                   ctx.fillStyle = fillStyle[this.inSelectedArea(i, t) * 1];
                   ctx.beginPath();
                   ctx.rect(i * SCALE, y, SCALE, SCALE);
@@ -331,7 +332,7 @@ Vue.component("pianoroll", {
       for(let t = 0; t < this.notes.active[0].length; t++) {
           for (let i = 0; i < this.notes.active.length; i++) {
           if (this.inSelectedArea(i, t)) {
-              this.notes.active[i][t] = t < 2 ? 90:512;
+              this.notes.active[i][t] = this.$props.jp_props.options.mask_ids[t];
           }
         }
       }
@@ -434,7 +435,7 @@ Vue.component("pianoroll", {
 
     this.t = 0;
     if (this.$props.jp_props.options.notes.t > this.t) {
-      this.notes.active = this.$props.jp_props.options.notes.tensor;
+      this.notes.diffActiveTensors = this.$props.jp_props.options.notes.tensor;
       this.t = this.$props.jp_props.options.notes.t;
     }
 

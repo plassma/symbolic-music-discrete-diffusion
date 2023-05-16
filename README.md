@@ -1,5 +1,7 @@
 # SCHmUBERT
 
+implementation of absorbing state diffusion model from https://github.com/samb-t/unleashing-transformers
+
 ## Samples
 
 Samples in MIDI format can be found in the samples folder.
@@ -62,7 +64,7 @@ The GUI supports:
 
 ## Model Weights
 
-Model weights for the Conv_Transformer model trained on the Lakh-MIDI Dataset can be obtained [here](https://drive.google.com/file/d/1o719d4SOBMdjb3Gv_t6gxXVipekPdYhd/view?usp=share_link).
-Extract the 'logs' folder to the project root, and set the ```load_step``` accordingly (180000 for melody, 140000 for trio).
+Model weights for the Conv_Transformer EMA model trained on the Lakh-MIDI Dataset can be obtained [here](https://drive.google.com/file/d/1-MBFvSWiJvDkdTL9WDMA4I1ZWM36PVrw/view?usp=share_link).
+Extract the 'logs' folder to the project root, and set ```load_step, model, ...``` accordingly (250000, conv_transformer, ...).
 
 

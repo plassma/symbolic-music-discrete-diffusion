@@ -38,7 +38,7 @@ def save_model(model, model_save_name, step, log_dir):
     torch.save(model.state_dict(), os.path.join(log_dir, model_name))
 
 
-def load_model(model, model_load_name, step, log_dir, strict=False):
+def load_model(model, model_load_name, step, log_dir, strict=True):
     print(f"Loading {model_load_name}_{str(step)}.th")
     log_dir = "logs/" + log_dir + "/saved_models"
     try:
@@ -86,7 +86,7 @@ def sample_audio(samples):
     samples = samples.copy()
     if len(samples.shape) < 3:
         samples = np.expand_dims(samples, 0)
-    samples[samples == 90] = 0
+    samples[samples == 90] = 0#todo: could remove drum pattern
     samples[samples == 512] = 0
     samples = samples_2_noteseq(samples)
     return [fluidsynth(s, 44100., 'soundfont.sf2') for s in samples]
@@ -123,4 +123,4 @@ def log_stats(step, stats):
 
 
 def set_up_visdom(H):
-    vis = visdom.Visdom(port=H.port)
+    return visdom.Visdom(port=H.port)

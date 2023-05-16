@@ -1,5 +1,5 @@
 import argparse
-from .default_hparams import HparamsAbsorbing, HparamsAbsorbingConv
+from .default_hparams import HparamsAbsorbing, HparamsAbsorbingConv, HparamsHierarchTransformer, HparamsUTransformer
 
 
 def add_common_args(parser):
@@ -13,6 +13,11 @@ def add_common_args(parser):
     parser.add_argument("--dataset_path", type=str, default='data/lakh_melody_64_1MIO.npy')
     parser.add_argument("--port", type=int, default=8097)
 
+
+def add_sample_args(parser):
+    parser.add_argument("--batch_size", type=int, default=16)
+    parser.add_argument("--n_samples", type=int, default=1000)
+    parser.add_argument("--no_gui", const=True, action="store_const", default=False)
 
 def add_train_args(parser):
     add_eval_args(parser, 1)
@@ -32,6 +37,7 @@ def add_train_args(parser):
 
 def add_eval_args(parser, num_evals=5):
     parser.add_argument("--mode", type=str, default='unconditional')
+    parser.add_argument("--mask_tracks", nargs="+", type=int, default=[])
     parser.add_argument("--sampling_batch_size", type=int, default=256)
     parser.add_argument("--gap_start", type=int, default=-1)
     parser.add_argument("--gap_end", type=int, default=-1)
@@ -48,16 +54,19 @@ def get_sampler_hparams(mode):
     elif mode == 'eval':
         add_eval_args(parser)
     elif mode == 'sample':
-        pass
+        add_sample_args(parser)
 
 
     parser_args = parser.parse_args()
 
     if parser_args.model == 'transformer':
         H = HparamsAbsorbing(parser_args)
+    elif parser_args.model == 'hierarch_transformer':
+        H = HparamsHierarchTransformer(parser_args)
+    elif parser_args.model == 'U_transformer':
+        H = HparamsUTransformer(parser_args)
     else:
         parser_args.model = 'conv_transformer'
         H = HparamsAbsorbingConv(parser_args)
-
 
     return H

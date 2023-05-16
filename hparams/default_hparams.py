@@ -25,6 +25,7 @@ class HparamsAbsorbing(HparamsBase):
         self.loss_type = "reweighted_elbo"
         self.sample_type = "diffusion"
         self.mask_schedule = "random"
+        self.sample_schedule = "random"#"barwise"
         self.attn_pdrop = 0.2
         self.embd_pdrop = 0.2
         self.resid_pdrop = 0.2
@@ -37,11 +38,12 @@ class HparamsAbsorbing(HparamsBase):
         self.load_step = 0
         self.sampling_batch_size = 24
         self.bert_n_emb = 512
-        self.bert_n_head = 16
+        self.bert_n_head = 8
         self.bert_n_layers = 24
         self.lr = 5e-4
         self.warmup_iters = 10000
         self.validation_set_size = 0.05
+        self.augment = True
 
         self.apply_parser_values(parser)
 
@@ -63,3 +65,21 @@ class HparamsAbsorbingConv(HparamsAbsorbing):
         self.bert_n_emb = 512
         self.conv_layers = 1
         self.conv_len = 4
+
+
+class HparamsHierarchTransformer(HparamsAbsorbing):
+    def __init__(self, parser):
+        super().__init__(parser)
+        self.sub_seq_len = 32
+        self.bert_n_emb = 512
+        self.upper_bert_n_emb = 512
+        self.augment = False
+
+
+class HparamsUTransformer(HparamsAbsorbing):
+    def __init__(self, parser):
+        super().__init__(parser)
+        self.layers_per_level = 2
+        self.bert_n_emb = 512
+        self.conv_width = 4
+        self.augment = False

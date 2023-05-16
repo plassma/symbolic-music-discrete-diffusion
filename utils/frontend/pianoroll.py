@@ -36,8 +36,8 @@ class BindableNumpyProperty(BindableProperty):
 
 class PianorollView(CustomView):
 
-    def __init__(self, notes: np.ndarray, onDiffuse: Callable, events: List[str]):
-        super().__init__('pianoroll', events=events, notes=notes)
+    def __init__(self, H, notes: np.ndarray, onDiffuse: Callable, events: List[str]):
+        super().__init__('pianoroll', events=events, notes=notes, mask_ids=H.codebook_size)
         self.allowed_events = ['onConnect', 'onDiffuse']
         self.initialize(onDiffuse=onDiffuse, onConnect=self.on_connect)
         self.sockets = []
@@ -59,7 +59,7 @@ def _handle_notes_change(sender: Element, notes) -> None:
 class Pianoroll(Element, BindSourceMixin):
     notes = BindableNumpyProperty(on_change=_handle_notes_change)
 
-    def __init__(self, notes: dict = None, *,
+    def __init__(self, H, notes: dict = None, *,
                  on_diffuse: Optional[Callable] = None, events: List[str] = ['diffuse']):
         """Interactive Image
 
@@ -68,10 +68,11 @@ class Pianoroll(Element, BindSourceMixin):
         """
 
         if not isinstance(notes, np.ndarray):
-            notes = {'tensor': (np.ones((1024, 3)) * (90, 90, 512)).tolist(), 't': 0}
+            notes = {'tensor': (np.ones((1024, 3)) * np.array(H.codebook_size)).tolist(), 't': 0}
 
         self.mouse_handler = on_diffuse
-        super().__init__(PianorollView(notes, self.handle_mouse, events))
+        super().__init__(PianorollView(H, notes, self.handle_mouse, events))
+        super().classes('scrollable-pianoroll')
 
         self.notes = notes
 

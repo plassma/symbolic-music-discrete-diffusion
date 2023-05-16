@@ -26,5 +26,4 @@ if __name__ == '__main__':
     else:
         sampler, ema_sampler = None, None
 
-    np.random.seed(420)
-    evaluate(H, ema_sampler if H.ema else sampler)
+    evaluate(H, ema_sampler if H.ema else sampler, True)

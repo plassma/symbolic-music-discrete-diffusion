@@ -1,15 +1,4 @@
-import itertools
-from statistics import NormalDist
-
 import numpy as np
-from note_seq import quantize_note_sequence
-from note_seq import sequences_lib
-from tqdm import tqdm
-
-from preprocessing import OneHotMelodyConverter
-from .sampler_utils import get_samples
-
-
 class EMA():
     def __init__(self, beta):
         super().__init__()
@@ -30,3 +19,15 @@ def optim_warmup(H, step, optim):
     lr = H.lr * float(step) / H.warmup_iters
     for param_group in optim.param_groups:
         param_group['lr'] = lr
+
+
+def augment_note_tensor(H, batch):
+    if H.augment:
+        for i in range(len(batch)):
+            x = batch[i]
+            x = x[:, :2]
+            x = x[x > 1]
+            mi, ma = -x.min() + 2, H.codebook_size[0] - x.max()
+            shift = np.random.randint(mi, ma)
+            batch[i, :, :2][batch[i, :, :2] > 1] += shift
+    return batch

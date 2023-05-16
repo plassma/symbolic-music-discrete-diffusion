@@ -1,5 +1,4 @@
 import copy
-import copy
 import time
 
 import numpy as np
@@ -9,8 +8,9 @@ from tqdm import tqdm
 
 from hparams import get_sampler_hparams
 from utils import *
+
 from utils.sampler_utils import get_samples
-from utils.train_utils import EMA, optim_warmup
+from utils.train_utils import EMA, optim_warmup, augment_note_tensor
 
 
 def main(H, vis):
@@ -98,36 +98,6 @@ def main(H, vis):
                 win='Val_elbo',
                 opts=dict(title='Validation ELBO')
             )
-            vis.line(
-                cons_var[0],
-                list(range(H.steps_per_eval, start_step, H.steps_per_eval)),
-                win='Pitch',
-                name='consistency',
-                opts=dict(title='Pitch')
-            )
-            vis.line(
-                cons_var[1],
-                list(range(H.steps_per_eval, start_step, H.steps_per_eval)),
-                win='Pitch',
-                name='variance',
-                update='append',
-                opts=dict(title='Pitch')
-            )
-            vis.line(
-                cons_var[2],
-                list(range(H.steps_per_eval, start_step, H.steps_per_eval)),
-                win='Duration',
-                name='consistency',
-                opts=dict(title='Duration')
-            )
-            vis.line(
-                cons_var[3],
-                list(range(H.steps_per_eval, start_step, H.steps_per_eval)),
-                win='Duration',
-                name='variance',
-                update='append',
-                opts=dict(title='Duration')
-            )
         else:
             log('No stats file found for loaded model, displaying stats from load step only.')
 
@@ -148,7 +118,7 @@ def main(H, vis):
             if step <= H.warmup_iters:
                 optim_warmup(H, step, optim)
 
-        x = next(train_iterator)
+        x = augment_note_tensor(H, next(train_iterator))
         x = x.cuda(non_blocking=True)
 
         if H.amp:
@@ -219,43 +189,9 @@ def main(H, vis):
 
         if H.steps_per_eval and step % H.steps_per_eval == 0 and step:
             min_step = H.steps_per_eval
-            [[c_p, c_d], [v_p, v_d]] = evaluate(H, ema_sampler if H.ema else sampler)
-            cons_var = tuple(np.append(x, y) for x, y in zip(cons_var, [c_p, v_p, c_d, v_d]))
-            vis.line(
-                np.array([c_p]),
-                np.array([step]),
-                win='Pitch',
-                update=('append' if step > min_step else 'replace'),
-                name='consistency',
-                opts=dict(title='Pitch')
-            )
-            vis.line(
-                np.array([v_p]),
-                np.array([step]),
-                win='Pitch',
-                update=('append' if step > min_step else 'replace'),
-                name='variance',
-                opts=dict(title='Pitch')
-            )
-            vis.line(
-                np.array([c_d]),
-                np.array([step]),
-                win='Duration',
-                update=('append' if step > min_step else 'replace'),
-                name='consistency',
-                opts=dict(title='Duration')
-            )
-            vis.line(
-                np.array([v_d]),
-                np.array([step]),
-                win='Duration',
-                update=('append' if step > min_step else 'replace'),
-                name='variance',
-                opts=dict(title='Duration')
-            )
 
             # calculate validation loss
-            valid_loss, valid_elbo, num_samples = 0.0, 0.0, 0
+            valid_loss, valid_elbo, num_batches = 0.0, 0.0, 0
             log(f"Evaluating step {step}")
 
             for x in tqdm(val_loader):
@@ -264,10 +200,10 @@ def main(H, vis):
                     valid_loss += stats['loss'].item()
                     if H.sampler == 'absorbing':
                         valid_elbo += stats['vb_loss'].item()
-                    num_samples += x.size(0)
-            valid_loss = valid_loss / num_samples
+                    num_batches += 1
+            valid_loss = valid_loss / num_batches
             if H.sampler == 'absorbing':
-                valid_elbo = valid_elbo / num_samples
+                valid_elbo = valid_elbo / num_batches
 
             val_losses = np.append(val_losses, valid_loss)
             val_elbos = np.append(val_elbos, valid_elbo)
