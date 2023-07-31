@@ -18,6 +18,7 @@ def add_sample_args(parser):
     parser.add_argument("--batch_size", type=int, default=16)
     parser.add_argument("--n_samples", type=int, default=1000)
     parser.add_argument("--no_gui", const=True, action="store_const", default=False)
+    parser.add_argument("--piece", type=str, default="")
 
 def add_train_args(parser):
     add_eval_args(parser, 1)

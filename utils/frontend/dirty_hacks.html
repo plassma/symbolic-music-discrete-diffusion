@@ -1,86 +1,121 @@
 <style>
-        .scrollable-pianoroll div.canvas-wrapper {
-            max-width: 800px;
-            max-height: 820px;
-            overflow: auto;
-        }
 
-        .scrollable-pianoroll div.canvas-wrapper canvas {
-            width: 4096px!important;
-            height: 800px!important;
-            max-width: none;
-        }
+    div.scrollable-pianoroll {
+        width: 900px;
+    }
 
-        .canvas-wrapper-wrapper {
-            display: flex;
+    .scrollable-pianoroll div.canvas-wrapper {
+        max-height: 600px;
+        overflow-x: scroll;
+        position: relative;
+        width: 100%;
+        height: 600px;
+    }
 
-        }
+    div.canvas-wrapper svg {
+        display: block;
+        position: absolute;
+        top: 0;
+    }
 
-        .side-controls {
-            display: grid;
-            max-width: 40px;
-            font-size: 40px;
-        }
+    svg.notestd {
+        margin-left: 60px;
+    }
+    svg text{
+       -webkit-user-select: none;
+       -moz-user-select: none;
+       -ms-user-select: none;
+       user-select: none;
+    }
 
-        .pianoroll-controls i {
-            font-size: 40px;
-        }
+    select {
+        border: solid black;
+    }
 
-        .mask-melody-button {
-            color: red;
-        }
-        .mask-bass-button {
-            color: blue;
-        }
-        .mask-drums-button {
-            color: black;
-        }
-        .tab {
-          overflow: hidden;
-          border: 1px solid #ccc;
-          background-color: #f1f1f1;
-          width: fit-content;
-        }
+    .mask-selection-button::before {
+        content: "X";
+        position: absolute;
+        font-size: 25px;
+        padding-left: 12px;
+        padding-top: 2px;
+        z-index: 0;
+    }
 
-        /* Style the buttons that are used to open the tab content */
-        .tab button {
-          background-color: inherit;
-          float: left;
-          border: none;
-          outline: none;
-          cursor: pointer;
-          padding: 14px 16px;
-          transition: 0.3s;
-        }
+    .select-all-button {
+        border: solid black;
+        margin-right: 5px;
+    }
 
-        /* Change background color of buttons on hover */
-        .tab button:hover {
-          background-color: #ddd;
-        }
+    .canvas-wrapper-wrapper {
+        display: flex;
+        height: 600px;
+    }
 
-        /* Create an active/current tablink class */
-        .tab button.active {
-          background-color: #ccc;
-        }
+    .top-bar {
+        display: flex;
+    }
 
-        .tab button.d-active {
-            border: black;
-            border-style: solid;
-        }
+    .side-controls {
+        max-width: 40px;
+        font-size: 40px;
+    }
 
-        /* Style the tab content */
-        .tabcontent {
-          display: none;
-          padding: 6px 12px;
-          border: 1px solid #ccc;
-          border-top: none;
-        }
+    .pianoroll-controls i, .top-bar i{
+        font-size: 40px;
+    }
+
+    .mask-melody-button {
+        color: red;
+    }
+
+    .mask-bass-button {
+        color: blue;
+    }
+
+    .mask-drums-button {
+        color: black;
+    }
+
+    .tab {
+        overflow: hidden;
+        border: 1px solid #ccc;
+        background-color: #f1f1f1;
+        width: fit-content;
+    }
+
+    /* Style the buttons that are used to open the tab content */
+    .tab button {
+        background-color: inherit;
+        float: left;
+        border: none;
+        outline: none;
+        cursor: pointer;
+        padding: 14px 16px;
+        transition: 0.3s;
+    }
+
+    /* Change background color of buttons on hover */
+    .tab button:hover {
+        background-color: #ddd;
+    }
+
+    /* Create an active/current tablink class */
+    .tab button.active {
+        background-color: #ccc;
+    }
+
+    /* Style the tab content */
+    .tabcontent {
+        display: none;
+        padding: 6px 12px;
+        border: 1px solid #ccc;
+        border-top: none;
+    }
 </style>
-<!--<script src="https://cdn.jsdelivr.net/npm/@magenta/music@^1.23.1"></script>-->
-<script src="http://localhost:8097/sgm_plus/music@^1.23.1.js"></script>
+<script src="/utils/frontend/jquery-3.7.0.min.js"></script>
+<script src="/utils/frontend/music@^1.23.1.js"></script>
 
 <script>
-
     /*function arrayEquals(a, b) {
         return Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((val, index) => {
             if (Array.isArray(val))
@@ -93,75 +128,41 @@
     }
 
     class TensorStore {
-
-        initMaskTensor(len=1024, tracks=3) {
-        let result = [];
-        for(let i = 0; i < len; i++) {
-            let a = [];
-            for(let t = 0; t < tracks; t++) {
-                a.push(this.mask_ids[t]);
-            }
-            result.push(a);
-        }
-        return result;
-    }
-
-        static diffActive = [];
-        constructor(mask_ids, capacity=8) {
-            this.mask_ids = mask_ids;
-            this.i = 0;
-            this.tensors = [];
-            let f = TensorStore.diffActive.length === 0;
-            for (let i = 0; i < capacity; i++) {
-                this.tensors.push([this.initMaskTensor()]);
-                if(f) TensorStore.diffActive.push(false);
-            }
-            if (f) TensorStore.diffActive[this.i] = true;
-        }
-
-        get autoDiffActivation() {
-            let sum = 0;
-            for(let f of TensorStore.diffActive)
-                if(f)
-                    sum++;
-            return sum <= 1;
-        }
-
-        get diffActiveTensors() {
+        initMaskTensor(len = 1024, tracks = 3) {
             let result = [];
-            for(let i = 0; i < TensorStore.diffActive.length; i++)
-                if(TensorStore.diffActive[i])
-                    result.push(this.tensors[i][this.tensors[i].length - 1]);
+            for (let i = 0; i < len; i++) {
+                let a = [];
+                for (let t = 0; t < tracks; t++) {
+                    a.push(this.mask_ids[t]);
+                }
+                result.push(a);
+            }
             return result;
         }
 
-        set diffActiveTensors(tensors) {
-            let j = 0;
-            for(let i = 0; i < TensorStore.diffActive.length; i++)
-                if(TensorStore.diffActive[i])
-                    this.tensors[i].push(tensors[j++]);
+        constructor(mask_ids, capacity = 8) {
+            this.mask_ids = mask_ids;
+            this.tensors = [];
+            for (let i = 0; i < capacity; i++) {
+                this.tensors.push([this.initMaskTensor()]);
+            }
         }
 
-        get active() {
-            let i = this.i;
+        next(i, empty=false) {
+            const n = empty? this.initMaskTensor() : copy(this.tensors[i][this.tensors[i].length - 1]);
+            this.tensors[i].push(n);
+        }
+        getActive(i) {
             return this.tensors[i][this.tensors[i].length - 1];
         }
 
-        set active(tensor) {
-            for(let i = 0; i < this.active.length; i++)
-                for (let t = 0; t < this.active[0].length; t++)
-                    if(this.active[i][t] === this.mask_ids[t])
-                        this.active[i][t] = tensor[i][t];
+        setActive(i, tensor) {
+            this.tensors[i].push(tensor);
         }
 
-        next(empty=false) {
-            const n = empty? initMaskTensor() : copy(this.tensors[this.i][this.tensors[this.i].length - 1]);
-            this.tensors[this.i].push(n);
-        }
-
-        undo() {
-            if (this.tensors[this.i].length > 1) {
-                this.tensors[this.i].pop();
+        undo(i) {
+            if (this.tensors[i].length > 1) {
+                this.tensors[i].pop();
             } else {
                 console.log("cannot undo anymore!");
             }
@@ -173,18 +174,20 @@
         const a = cans.first();
         const b = cans.last();
 
-    a.scroll(function () {
+        a.scroll(function () {
             b.scrollTop(a.scrollTop());
             b.scrollLeft(a.scrollLeft());
-    });
-    b.scroll(function () {
-        a.scrollTop(b.scrollTop());
-        a.scrollLeft(b.scrollLeft());
-    });
-  }
+        });
+        b.scroll(function () {
+            a.scrollTop(b.scrollTop());
+            a.scrollLeft(b.scrollLeft());
+        });
+    }
 
-  window.addEventListener('DOMContentLoaded', (event) => {
-      console.log('DOM fully loaded and parsed');
-      syncScroll();
+    const TENSOR_STORE = new TensorStore([90, 90, 512]);
+
+    window.addEventListener('DOMContentLoaded', event => {
+        console.log('DOM fully loaded and parsed');
+        syncScroll();
     });
 </script>

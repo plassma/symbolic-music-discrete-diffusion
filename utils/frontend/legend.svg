@@ -1,0 +1,32 @@
+<svg width="200" height="100" xmlns="http://www.w3.org/2000/svg">
+    <svg >
+        <text x="0" y="10">Melody</text>
+        <text x="60" y="10">note</text>
+        <rect x="90" y="2" width="20" height="8" fill="rgb(255, 0, 0)"/>
+        <text x="115" y="10">pause</text>
+        <rect x="155" y="2" width="20" height="8" fill="none" stroke="rgb(255, 0, 0)"/>
+    </svg>
+    <svg y="18">
+        <text x="0" y="10">Bass</text>
+        <text x="60" y="10">note</text>
+        <rect x="90" y="2" width="20" height="8" fill="rgb(0, 0, 255)"/>
+        <text x="115" y="10">pause</text>
+        <rect x="155" y="2" width="20" height="8" fill="none" stroke="rgb(0, 0, 255)"/>
+    </svg>
+    <svg y="36">
+        <text x="0" y="10">Drum</text>
+        <text x="60" y="10">note</text>
+        <rect x="90" y="2" width="6" height="8" fill="black"/>
+        <text x="115" y="10">pause</text>
+        <rect x="155" y="2" width="6" height="8" fill="none" stroke="black"/>
+    </svg>
+    <svg y="54">
+        <text x="0" y="10">Selected</text>
+        <text x="60" y="10">note</text>
+        <rect x="90" y="2" width="6" height="8" fill="rgb(0, 255, 0)"/>
+        <text x="115" y="10">pause</text>
+        <rect x="155" y="2" width="6" height="8" fill="rgb(0, 255, 0)" stroke="red"/>
+        <rect x="165" y="2" width="6" height="8" fill="rgb(0, 255, 0)" stroke="blue"/>
+        <rect x="175" y="2" width="6" height="8" fill="rgb(0, 255, 0)" stroke="black"/>
+    </svg>
+</svg>

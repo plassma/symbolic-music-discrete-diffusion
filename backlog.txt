@@ -1,0 +1,29 @@
+pianoroll-representation ✓
+gute samples ✓
+maske vertikal hinterlegen ✓
+scale vertical adaptive ✓
+evtl nicht: <tracks trennen> benennen ✓
+-> legende ✓
+-> sessions ✓
+achsen beschriften  ✓
+pfeile für aktionen ✓
+tabs raus ✓
+stücke mit boxen abtrennen  ✓
+repair cursor ✓
+
+lock actions while diffusing ✓
+alt texte buttons ✓
+beschriftungen ✓
+tracks mask durchstreichen ✓
+alles maskieren ✓
+horizontal markieren ✓
+transpose selection
+masks influence pause position?
+(re)fill selection
+guided tour
+preselected MIDIs
+
+local storage
+clean code - wandb
+floating pause?
+batched queue

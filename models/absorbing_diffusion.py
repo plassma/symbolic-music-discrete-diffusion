@@ -28,6 +28,8 @@ class AbsorbingDiffusion(Sampler):
         self.register_buffer('loss_history', torch.zeros(self.num_timesteps+1))
         assert self.mask_schedule in ['random', 'fixed']
 
+        self.task_queue = []
+
     def sample_time(self, b, device, method='uniform'):
         if method == 'importance':
             if not (self.Lt_count > 10).all():
@@ -102,7 +104,7 @@ class AbsorbingDiffusion(Sampler):
             x_t, x_0_ignore, mask = self.q_sample_mlm(x_0=x_0, t=t)
 
         # sample p(x_0 | x_t)
-        x_0_hat_logits = self._denoise_fn(x_t)#todo: check time even necessary?!
+        x_0_hat_logits = self._denoise_fn(x_t)
         x_0_hat_logits = [el.permute(0, 2, 1) for el in x_0_hat_logits]
 
         # Always compute ELBO for comparison purposes
@@ -181,6 +183,65 @@ class AbsorbingDiffusion(Sampler):
                 logits=x) for x in x_0_logits]
             x_0_hat = torch.stack([xd.sample().long() for xd in x_0_dist], -1)
             x_T[changes] = x_0_hat[changes]
+
+        if progress_handler:
+            progress_handler(100)
+
+        return x_T
+
+    def queue_sample_task(self, progress_handler, finished_handler, sample_steps=None, x_T=None, b=1):
+        device = 'cuda'
+
+        if x_T is None:
+            x_T = torch.ones((b, *self.shape), device=device).long() * self.mask_id
+
+        unmasked = torch.zeros_like(x_T, device=device, dtype=torch.bool)
+        unmasked[x_T != self.mask_id] = True
+
+        if sample_steps:
+            sample_steps = min(sample_steps, (~unmasked).sum())
+
+        sample_steps = list(range(1, sample_steps + 1))
+
+        for tensor in x_T:
+            self.task_queue.append((tensor, sample_steps, progress_handler, finished_handler))
+
+    def sample_worker(self, temp=1.0):
+        device = 'cuda'
+        last_progress = 0
+
+        x_T = torch.ones((0, *self.shape), device=device).long() * self.mask_id
+
+        while True:
+
+            while x_T.shape[0] < 1:
+
+                x_T = torch.stack((x_T, ))
+
+            for t in reversed(sample_steps):
+
+                p = int(100 * (len(sample_steps) - t) / len(sample_steps))
+                if progress_handler and p > last_progress:
+                    last_progress = p
+                    progress_handler(p)
+
+                print(f'Sample timestep {t:4d}', end='\r')
+                t = torch.full((b,), t, device=device, dtype=torch.long)
+
+                # where to unmask
+                changes = torch.rand(x_T.shape, device=device) < 1 / t.float().view(-1, *((1,) * (len(x_T.shape) - 1)))
+                # don't unmask somewhere already unmasked
+                changes = torch.bitwise_xor(changes, torch.bitwise_and(changes, unmasked))
+                # update mask with changes
+                unmasked = torch.bitwise_or(unmasked, changes)
+
+                x_0_logits = self._denoise_fn(x_T, t=t)
+                # scale by temperature
+                x_0_logits = [x / temp for x in x_0_logits]
+                x_0_dist = [dists.Categorical(
+                    logits=x) for x in x_0_logits]
+                x_0_hat = torch.stack([xd.sample().long() for xd in x_0_dist], -1)
+                x_T[changes] = x_0_hat[changes]
 
         return x_T
 

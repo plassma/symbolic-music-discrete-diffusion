@@ -123,7 +123,7 @@ def combine_converter_tensors(converter_tensors, max_num_tensors=None,
     return ConverterTensors()
 
 
-def np_onehot(indices, depth, dtype=np.bool):
+def np_onehot(indices, depth, dtype=bool):
   """Converts 1D array of indices to a one-hot 2D array with given depth."""
   #onehot_seq = np.zeros((len(indices), depth), dtype=dtype)
   #onehot_seq[np.arange(len(indices)), indices] = 1.0
@@ -173,7 +173,7 @@ class BaseNoteSequenceConverter(object):
                output_depth,
                output_dtype,
                control_depth=0,
-               control_dtype=np.bool,
+               control_dtype=bool,
                end_token=None,
                max_tensors_per_notesequence=None,
                length_shape=(),
@@ -357,11 +357,11 @@ class LegacyEventListOneHotConverter(BaseNoteSequenceConverter):
     )
     super(LegacyEventListOneHotConverter, self).__init__(
         input_depth=depth,
-        input_dtype=np.bool,
+        input_dtype=bool,
         output_depth=depth,
-        output_dtype=np.bool,
+        output_dtype=bool,
         control_depth=control_depth,
-        control_dtype=np.bool,
+        control_dtype=bool,
         end_token=legacy_encoder_decoder.num_classes if add_end_token else None,
         presplit_on_time_changes=presplit_on_time_changes,
         max_tensors_per_notesequence=max_tensors_per_notesequence)
@@ -788,9 +788,9 @@ class DrumsConverter(BaseNoteSequenceConverter):
 
     super(DrumsConverter, self).__init__(
         input_depth=input_depth,
-        input_dtype=np.bool,
+        input_dtype=bool,
         output_depth=output_depth,
-        output_dtype=np.bool,
+        output_dtype=bool,
         end_token=output_depth - 1 if add_end_token else None,
         presplit_on_time_changes=presplit_on_time_changes,
         max_tensors_per_notesequence=max_tensors_per_notesequence)
@@ -846,7 +846,7 @@ class DrumsConverter(BaseNoteSequenceConverter):
         else:
           t_roll = t
         rolls.append(np.vstack([
-            self._pr_encoder_decoder.events_to_input(t_roll, i).astype(np.bool)
+            self._pr_encoder_decoder.events_to_input(t_roll, i).astype(bool)
             for i in range(len(t_roll))]))
       if not (self._roll_input and self._roll_output):
         labels = [self._oh_encoder_decoder.encode_event(e) for e in t]
@@ -855,7 +855,7 @@ class DrumsConverter(BaseNoteSequenceConverter):
         oh_vecs.append(np_onehot(
             labels,
             self._oh_encoder_decoder.num_classes + (self.end_token is not None),
-            np.bool))
+            bool))
 
     if self._roll_input:
       input_seqs = [
@@ -965,9 +965,9 @@ class TrioConverter(BaseNoteSequenceConverter):
 
     super(TrioConverter, self).__init__(
         input_depth=output_depth,
-        input_dtype=np.bool,
+        input_dtype=bool,
         output_depth=output_depth,
-        output_dtype=np.bool,
+        output_dtype=bool,
         control_depth=self._melody_converter.control_depth,
         control_dtype=self._melody_converter.control_dtype,
         end_token=False,
@@ -1018,7 +1018,7 @@ class TrioConverter(BaseNoteSequenceConverter):
     # Assign an instrument class for each instrument, and compute its coverage.
     # If an instrument has multiple classes, it is considered INVALID.
     instrument_type = np.zeros(MAX_INSTRUMENT_NUMBER + 1, np.uint8)
-    coverage = np.zeros((total_bars, MAX_INSTRUMENT_NUMBER + 1), np.bool)
+    coverage = np.zeros((total_bars, MAX_INSTRUMENT_NUMBER + 1), bool)
     for note in quantized_sequence.notes:
       i = note.instrument
       if i > MAX_INSTRUMENT_NUMBER:
