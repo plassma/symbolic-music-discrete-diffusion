@@ -91,11 +91,20 @@ export default {
                 <i class="material-icons" title="transpose down">keyboard_arrow_down</i>
             </a>
           </span>
+          <span style="margin: 20px;">
+            Time-Shift
+            <a href="#" class="shift-left">
+                <i class="material-icons" title="shift left">keyboard_arrow_left</i>
+            </a>
+            <a href="#" class="shift-right">
+                <i class="material-icons" title="shift right">keyboard_arrow_right</i>
+            </a>
+          </span>
         </div>
     </div>
   `,
     mounted() {
-        const MIN_PITCH = 20, MAX_PITCH = 107;
+        const MIN_PITCH = 20, MAX_PITCH = 110;
         const CAPACITY = 8;
         const AXES_PAD = 60;
         const TICK_FONT_SIZE = 12;
@@ -217,21 +226,21 @@ export default {
             let source = this.direction ? window.pianorolls[this.other_pianoroll_idx] : this;
             let dest = this.direction ? this: window.pianorolls[this.other_pianoroll_idx];
 
-            dest.setActiveTensor(source.getActiveTensor());
+            dest.mergeActive(source.getActiveTensor());
             this.update();
         });
-        this.can_diffuse = true;
-        const diffuse_button = $("#" + this.$props.id + " .diffuse-button");
-        diffuse_button.click(() => {
-            if (this.can_diffuse) {
-                diffuse_button.addClass('disabled');
-                this.can_diffuse = false;
-                this.$emit('diffuse', {
-                    direction: this.direction, tensor: window.pianorolls[this.direction * 1].getActiveTensor(),
-                    target_slot: window.pianorolls[(!this.direction) * 1].active_index
-                });
-            }
-        });
+
+        const diffuseButton = $("#" + this.$props.id + " .diffuse-button");
+        this.diffuseHandler = () => {
+            diffuseButton.addClass('disabled');
+            this.can_diffuse = false;
+            this.$emit('diffuse', {
+                direction: this.direction, tensor: window.pianorolls[this.direction * 1].getActiveTensor(),
+                target_slot: window.pianorolls[(!this.direction) * 1].active_index
+            });
+            return false;
+        };
+        diffuseButton.click(this.diffuseHandler);
 
         $("#" + this.$props.id + " .select-all-button").click(() => {
             this.selectionMode = $("#" + this.$props.id + " .select-shortcut").val();
@@ -273,6 +282,8 @@ export default {
         this.active_index = 0;
         this.getActiveTensor = () => TENSOR_STORE.getActive(this.active_index);
         this.setActiveTensor = tensor => TENSOR_STORE.setActive(this.active_index, tensor);
+
+        this.mergeActive = tensor => TENSOR_STORE.mergeActive(this.active_index, tensor);
 
         for (let i = 0; i < CAPACITY; i++) {
             $("#" + this.$props.id + " .tab").append(
@@ -391,6 +402,7 @@ export default {
             this.axes.append(defs);
             if (this.cursor.active)
                 this.axes.append(this.cursor);
+            this.axes.append(this.selectionRect);
 
              let xAxis = document.createElementNS('http://www.w3.org/2000/svg', 'line');
             xAxis.setAttribute('x1', AXES_PAD);
@@ -550,7 +562,7 @@ export default {
                                 s += parseInt(this.svgs[i].children[j - 1].getAttribute('y'));
                                 d += 1
                             }
-                            if (j < this.svgs[i].children.length - 1) {
+                            if (j < this.svgs[i].children.length - 1 && !this.svgs[i].children[j + 1].getAttribute('pause')) {
                                 s += parseInt(this.svgs[i].children[j + 1].getAttribute('y'));
                                 d += 1;
                             }
@@ -641,7 +653,7 @@ export default {
 
         const transpose = (delta) => {
             TENSOR_STORE.next(this.active_index);
-
+            let moved = false;
             doForHorizSelectedNotes((track, svg, note) => {
                 if (track === 2 || note.getAttribute('pause'))
                     return;
@@ -652,11 +664,20 @@ export default {
                     let end = this.splitUpNotes[PROGRAMS[track]].notes[index].quantizedEndStep;
 
                     for (; start < end; start++) {
-                        if (2 < this.getActiveTensor()[start][track] < (this.$props.mask_ids[track] - delta))
+                        if (2 < this.getActiveTensor()[start][track] &&
+                            this.getActiveTensor()[start][track] < (this.$props.mask_ids[track] - delta)) {
                             this.getActiveTensor()[start][track] += delta;
+                            moved = true;
+                        }
+
                     }
                 }
             });
+
+            if (this.rectMode === "default" && moved)
+                this.selectionRect.setAttribute("y", parseInt(
+                    this.selectionRect.getAttribute("y")) - delta * this.visualizers[0].config.noteHeight);
+
 
             this.update(false);
             drawSelection(true);
@@ -664,6 +685,57 @@ export default {
 
         $("#" + this.$props.id + " .transpose-up").click(() => transpose(1));
         $("#" + this.$props.id + " .transpose-down").click(() => transpose(-1));
+
+        const timeShift = delta => {
+            TENSOR_STORE.next(this.active_index);
+            let moved = false;
+
+            let prevTens = TENSOR_STORE.tensors[this.active_index];
+            prevTens = prevTens[prevTens.length - 2];
+
+            for (let track = 0; track < 3; track++)
+                for (let i = Math.floor(this.selectionBoundHorizontal.x1 / this.SCALE); i < Math.floor(this.selectionBoundHorizontal.x2 / this.SCALE); i++)
+                    this.getActiveTensor()[i][track] = this.$props.mask_ids[track];
+
+            doForHorizSelectedNotes((track, svg, note) => {
+                let inSelection = !!this.selectionMode || svg.checkIntersection(note, getSelectionBounds());
+                if (inSelection) {
+                    let index = parseInt(note.getAttribute("data-index"));
+
+                    let start, end;
+
+                    if (note.getAttribute('pause')) {
+                        start = parseInt(note.getAttribute('startStep'));
+                        end = parseInt(note.getAttribute('stopStep'));
+                    } else {
+                        start = this.splitUpNotes[PROGRAMS[track]].notes[index].quantizedStartStep;
+                        end = this.splitUpNotes[PROGRAMS[track]].notes[index].quantizedEndStep;
+                    }
+
+                    for (; start < end; start++) {
+                        if (start + delta >= 0 && start + delta <= 1024) {
+                            this.getActiveTensor()[start + delta][track] = prevTens[start][track];
+                            moved = true;
+                        }
+
+                    }
+                }
+            });
+
+            if (this.rectMode === "default" && moved) {
+                this.selectionRect.setAttribute("x", parseInt(
+                    this.selectionRect.getAttribute("x")) + delta * this.SCALE);
+                this.selectionBoundHorizontal.x1 += delta * this.SCALE;
+                this.selectionBoundHorizontal.x2 += delta * this.SCALE;
+            }
+
+
+            this.update(false);
+            drawSelection(true);
+        };
+
+        $("#" + this.$props.id + " .shift-left").click(() => timeShift(-16));
+        $("#" + this.$props.id + " .shift-right").click(() => timeShift(16));
 
         const activateTab = i => {
             this.active_index = i;
@@ -686,7 +758,7 @@ export default {
 
                 let l = 0, h = children.length;
                 let upperX = Infinity;
-                if (!this.selectionMode) {
+                if (!this.selectionMode && this.selectionBoundHorizontal) {
                     upperX = this.selectionBoundHorizontal.x2;
                     //search horiz. start of selection binary
                     while (h - l > 1) {
@@ -775,7 +847,7 @@ export default {
         });
         this.axes.addEventListener('mouseup', () => {
             this.origin = null;
-        })
+        });
         this.axes.addEventListener('mousemove', e => {
             if (this.origin) {
                 if (this.selectionMode) {
@@ -800,7 +872,7 @@ export default {
                 if (this.$props.target_slot > -1) {
                     TENSOR_STORE.setActive(this.$props.target_slot, this.$props.tensor);
                      $(".diffuse-button").removeClass('disabled');
-                    this.can_diffuse = true;
+                     $("#" + window.pianorolls[0].id + ".diffuse-button").click(window.pianorolls[0].diffuseHandler);
                 }
                  else
                     this.setActiveTensor(this.$props.tensor);

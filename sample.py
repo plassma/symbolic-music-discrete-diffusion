@@ -16,6 +16,8 @@ from utils.sampler_utils import ns_to_np, get_samples, np_to_ns
 from utils.ui_utils import get_styles
 
 LEGEND_SVG = open('utils/frontend/legend.svg', 'r').read()
+DEMO_TOUR_HTML = open('utils/frontend/really_dirty_hacks.html', 'r').read()
+
 async def io_bound(callback: Callable, *args: any, **kwargs: any):
     '''Makes a blocking function awaitable; pass function as first parameter and its arguments as the rest'''
     return await asyncio.get_event_loop().run_in_executor(None, functools.partial(callback, *args, **kwargs))
@@ -65,7 +67,6 @@ def index():
     ui_state = UIState()
 
     ui.add_head_html(get_styles())
-
     async def on_diffuse(event):
         source = np.expand_dims(np.array(event.args['tensor']), 0)
         await diffuse_to(source, (not event.args['direction']) * 1, event.args['target_slot'])
@@ -127,18 +128,23 @@ def index():
     with ui.row():
         ui.upload(on_upload=on_upload, label="Upload custom MIDI", auto_upload=True)
         ui.html(LEGEND_SVG)
-
-    ui.slider(value=1024, min=1, max=1024 * 3).bind_value_to(ui_state, 'timesteps')
-    ui.label().bind_text_from(ui_state, 'timesteps', lambda x: 'diffusion timesteps: ' + str(int(x)))
+        with ui.column():
+            ui.label().bind_text_from(ui_state, 'timesteps', lambda x: 'diffusion timesteps: ' + str(int(x)))
+            if 'tutorial' not in app.storage.user:
+                app.storage.user['tutorial'] = True
+            ui.switch('Tutorial', value=app.storage.user['tutorial']).bind_value_to(app.storage.user, 'tutorial').classes('tutorial-switch')
+    ui.slider(value=256, min=1, max=1024 * 3).bind_value_to(ui_state, 'timesteps')
 
     with ui.row():
-        left_pianoroll = Pianoroll(props={'mask_ids': H.codebook_size, 'side': 'left'}, on_diffuse=on_diffuse)
-        right_pianoroll = Pianoroll(props={'mask_ids': H.codebook_size, 'side': 'right'}, on_diffuse=on_diffuse)
+        left_pianoroll = Pianoroll(props={'mask_ids': H.codebook_size, 'side': 'left'}, on_diffuse=on_diffuse).classes("w-1/2")
+        right_pianoroll = Pianoroll(props={'mask_ids': H.codebook_size, 'side': 'right'}, on_diffuse=on_diffuse).classes("w-1/2")
 
-    app.storage.user['count'] = app.storage.user.get('count', 0) + 1
-    with ui.row():
-        ui.label('your own page visits:')
-        ui.label().bind_text_from(app.storage.user, 'count')
+    ui.add_body_html(DEMO_TOUR_HTML)
+
+    #app.storage.user['count'] = app.storage.user.get('count', 0) + 1
+    #with ui.row():
+    #    ui.label('your own page visits:')
+    #    ui.label().bind_text_from(app.storage.user, 'count')
 
 
 if __name__ == '__main__':

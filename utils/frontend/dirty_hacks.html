@@ -1,15 +1,15 @@
 <style>
 
     div.scrollable-pianoroll {
-        width: 900px;
+        width: 850px;
     }
 
     .scrollable-pianoroll div.canvas-wrapper {
-        max-height: 600px;
+        max-height: 620px;
         overflow-x: scroll;
         position: relative;
         width: 100%;
-        height: 600px;
+        height: 620px;
     }
 
     div.canvas-wrapper svg {
@@ -48,7 +48,7 @@
 
     .canvas-wrapper-wrapper {
         display: flex;
-        height: 600px;
+        height: 620px;
     }
 
     .top-bar {
@@ -104,6 +104,10 @@
         background-color: #ccc;
     }
 
+    .q-uploader__list {
+        display: none;
+    }
+
     /* Style the tab content */
     .tabcontent {
         display: none;
@@ -111,10 +115,21 @@
         border: 1px solid #ccc;
         border-top: none;
     }
+
+    .tut-high {
+        border: dashed red;
+    }
+
+    .next-button {
+        border: solid black;
+        float: right;
+    }
 </style>
 <script src="/utils/frontend/jquery-3.7.0.min.js"></script>
 <script src="/utils/frontend/music@^1.23.1.js"></script>
-
+<!-- todo: make available offline foll 2 lines-->
+<link rel="stylesheet" href="https://code.jquery.com/ui/1.13.2/themes/base/jquery-ui.css">
+<script src="https://code.jquery.com/ui/1.13.2/jquery-ui.js"></script>
 <script>
     /*function arrayEquals(a, b) {
         return Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((val, index) => {
@@ -158,6 +173,16 @@
 
         setActive(i, tensor) {
             this.tensors[i].push(tensor);
+        }
+
+        mergeActive(i, tensor) {
+            const len = 1024, tracks=3;
+            for (let j = 0; j < len; j++) {
+                for (let t = 0; t < tracks; t++) {
+                    if (this.tensors[i][this.tensors[i].length - 1][j][t] === this.mask_ids[t])
+                        this.tensors[i][this.tensors[i].length - 1][j][t] = tensor[j][t]
+                }
+            }
         }
 
         undo(i) {

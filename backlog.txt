@@ -17,10 +17,10 @@ beschriftungen ✓
 tracks mask durchstreichen ✓
 alles maskieren ✓
 horizontal markieren ✓
-transpose selection
-masks influence pause position?
-(re)fill selection
+transpose selection ✓
+masks influence pause position? ✓
 guided tour
+(re)fill selection
 preselected MIDIs
 
 local storage
