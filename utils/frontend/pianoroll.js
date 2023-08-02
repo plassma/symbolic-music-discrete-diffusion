@@ -128,6 +128,25 @@ export default {
         this.svgs = $("#" + this.$props.id + " svg.notestd");
         this.axes = $("#" + this.$props.id + " svg.axes")[0];
 
+        const checkIntersection = (element, rect) => {
+            let x = element.x.baseVal.value;
+            let y = element.y.baseVal.value;
+            let w = element.width.baseVal.value;
+            let h = element.height.baseVal.value;
+
+            if (w === 0 || h === 0 || rect.width === 0 || rect.height === 0)
+                return false;
+            if (x > rect.x + rect.width || rect.x > x + w)
+                return false;
+            return !(y > rect.y + rect.height || rect.y > y + h);
+        };
+
+        this.svgs.each( (i, svg) => {
+            if (!svg.checkIntersection) {
+                svg.checkIntersection = checkIntersection;
+            }
+        });
+
         const clearVisualizers = () => {
             if (this.visualizers) {
                 for (let k in this.visualizers)

@@ -19,7 +19,8 @@ alles maskieren ✓
 horizontal markieren ✓
 transpose selection ✓
 masks influence pause position? ✓
-guided tour
+guided tour ✓
+implement checkIntersection for FireFox
 (re)fill selection
 preselected MIDIs
 
