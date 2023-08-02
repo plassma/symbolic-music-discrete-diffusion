@@ -17,6 +17,7 @@ from utils.ui_utils import get_styles
 
 LEGEND_SVG = open('utils/frontend/legend.svg', 'r').read()
 DEMO_TOUR_HTML = open('utils/frontend/really_dirty_hacks.html', 'r').read()
+ACKNOWLEDGEMENTS = open('utils/frontend/acknowledgements.html', 'r').read()
 
 async def io_bound(callback: Callable, *args: any, **kwargs: any):
     '''Makes a blocking function awaitable; pass function as first parameter and its arguments as the rest'''
@@ -133,6 +134,8 @@ def index():
             if 'tutorial' not in app.storage.user:
                 app.storage.user['tutorial'] = True
             ui.switch('Tutorial', value=app.storage.user['tutorial']).bind_value_to(app.storage.user, 'tutorial').classes('tutorial-switch')
+        ui.html(ACKNOWLEDGEMENTS)
+
     ui.slider(value=256, min=1, max=1024 * 3).bind_value_to(ui_state, 'timesteps')
 
     with ui.row():
@@ -158,4 +161,4 @@ if __name__ == '__main__':
         sample_nogui(sampler, H)
     else:
 
-        ui.run(reload=False, port=H.port, title='SCHmUBERT', storage_secret='private key to secure the browser session cookie')
+        ui.run(reload=False, port=H.port, title='SCHmUBERT', storage_secret='private key to secure the browser session cookie', favicon='utils/frontend/favicon.png')
