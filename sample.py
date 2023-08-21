@@ -14,6 +14,7 @@ from utils import get_sampler, load_model
 from utils.frontend.pianoroll import Pianoroll
 from utils.sampler_utils import ns_to_np, get_samples, np_to_ns
 from utils.ui_utils import get_styles
+import copy
 
 LEGEND_SVG = open('utils/frontend/legend.svg', 'r').read()
 DEMO_TOUR_HTML = open('utils/frontend/really_dirty_hacks.html', 'r').read()
@@ -92,7 +93,21 @@ def index():
 
         await io_bound(_fn)
 
+    def extract_max_bars(ns, mode):
+        l, h = 1, 64
+
+        while l < h - 1:
+            m = (l+h)//2
+            npy = ns_to_np(ns, m, mode).outputs
+
+            if len(npy):
+                l = m
+            else:
+                h = m - 1
+        return ns_to_np(ns, l, mode).outputs[0]
+
     async def on_upload(e):  # todo: could be moved to GUI
+
         bytes = e.content.read()
 
         if bytes[:4] == b'MThd':
@@ -101,25 +116,28 @@ def index():
             ns = musicxml_to_sequence_proto(bytes)
         else:
             ui.notify("Seems not to be a valid MIDI or MusicXML file")
+            return
 
-        bars = min(64, int(max([n.end_time for n in ns.notes]) // 2))
-
-        npy = ns_to_np(ns, bars, 'trio').outputs
-
-        if len(npy) > 0:
-            npy = npy[0]
-            ui.notify("interpreting as trio")
-        else:
-            ui.notify("interpreting as melody")
-            npy = ns_to_np(ns, bars, 'melody').outputs[0]
+        npy = ns_to_np(ns, None, 'trio').outputs
+        try:
+            if len(npy) > 0:
+                ui.notify("interpreting as trio")
+                npy = npy[0]
+            else:
+                npy = ns_to_np(ns, None, 'melody').outputs[0]
+        except:
+            ui.notify("Piece could not be monophonized :(")
+            return
+        ui.notify("interpreting as melody")
         x_T = np.zeros((H.NOTES, 3), dtype=int)
 
         x_T[:] = H.codebook_size
-        x_T[:npy.shape[0], 0] = npy[:, 0]
+        l = min(x_T.shape[0], npy.shape[0])
 
         if npy.shape[1] == 3:
-            x_T[:npy.shape[0], 1] = npy[:, 1]
-            x_T[:npy.shape[0], 2] = npy[:, 2]
+            x_T[:l] = npy
+        else:
+            x_T[:l, 0] = npy[:, 0]
 
         await update_side(0, x_T)
 

@@ -1100,11 +1100,12 @@ class TrioConverter(BaseNoteSequenceConverter):
       grp_coverage = np.all(coverage[:, grp], axis=1)
       grp_coverage[:self._gap_bars] = np.any(coverage[:self._gap_bars, grp])
       grp_coverage[-self._gap_bars:] = np.any(coverage[-self._gap_bars:, grp])
-      for j in range(total_bars - self._slice_bars + 1):
-        if (np.all(grp_coverage[j:j + self._slice_bars]) and
+      slice_bars = self._slice_bars if self._slice_bars else total_bars
+      for j in range(total_bars - slice_bars + 1):
+        if (np.all(grp_coverage[j:j + slice_bars]) and
             all(i in encoded_instruments for i in grp)):
           start_step = j * self._steps_per_bar
-          end_step = (j + self._slice_bars) * self._steps_per_bar
+          end_step = (j + slice_bars) * self._steps_per_bar
           seqs.append(np.concatenate(
               [encoded_instruments[i][start_step:end_step] for i in grp],
               axis=-1))

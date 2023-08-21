@@ -70,9 +70,9 @@ export default {
           </a>
           <select class="select-shortcut">
             <option value="all">All</option>
-            <option value="melody">Melody</option>
-            <option value="bass">Bass</option>
-            <option value="drums">Drums</option>
+            <option value="0">Melody</option>
+            <option value="1">Bass</option>
+            <option value="2">Drums</option>
           </select>
           <span style="margin: 20px;">
               Selection Mode
@@ -81,7 +81,6 @@ export default {
                 <option value="horizontal">horizontal</option>
               </select>
           </span>
-          
           <span style="margin: 20px;">
             Transpose
             <a href="#" class="transpose-up">
@@ -168,7 +167,6 @@ export default {
 
         $("#" + this.$props.id + " .play-button").click(async () => {
             this.origin = null;
-            this.selectedArea = null;
             this.updateNoteSeq();
             if (this.playing) {
                 $("#" + this.$props.id + " .play-button i").text('play_arrow');
@@ -193,7 +191,6 @@ export default {
         }
         $("#" + this.$props.id + " .stop-button").click(() => {
             this.origin = null;
-            this.selectedArea = null;
             this.player.stop();
             clearVisualizers();
             $("#" + this.$props.id + " .play-button i").text('play_arrow');
@@ -203,7 +200,7 @@ export default {
             this.playerSeconds = 0;
             this.selectionRect.setAttribute('width', 0);
             this.selectionRect.setAttribute('height', 0);
-            this.selectionMode = false;
+            doSelection();
             drawSelection(false);
             return false;
         });
@@ -229,7 +226,6 @@ export default {
 
         $("#" + this.$props.id + " .undo-button").click(() => {
             this.origin = null;
-            this.selectedArea = null;
             TENSOR_STORE.undo(this.active_index);
             this.update();
             return false;
@@ -252,7 +248,6 @@ export default {
         const diffuseButton = $("#" + this.$props.id + " .diffuse-button");
         this.diffuseHandler = () => {
             diffuseButton.addClass('disabled');
-            this.can_diffuse = false;
             this.$emit('diffuse', {
                 direction: this.direction, tensor: window.pianorolls[this.direction * 1].getActiveTensor(),
                 target_slot: window.pianorolls[(!this.direction) * 1].active_index
@@ -261,9 +256,32 @@ export default {
         };
         diffuseButton.click(this.diffuseHandler);
 
+        const addToCurrentSelection = (note, track)=> {
+            note.sx = parseInt(note.getAttribute('x'));
+            note.sy = parseInt(note.getAttribute('y'));
+            note.track = track;
+            this.selection.push(note);
+        };
+
+        const doSpecialSelection = () => {
+            if (!this.specialSelection)
+                return;
+            const track = parseInt($("#" + this.$props.id + " .select-shortcut").val());
+            let tracks = [track];
+            if (!(track + 1)) {
+                tracks = [0, 1, 2];
+            }
+            tracks.forEach(track => {
+                for (const tp of this.svgs[track].children) {
+                    if (tp.getAttribute('data-index') || tp.getAttribute('pause'))
+                        addToCurrentSelection(tp, track);
+                }});
+            drawSelection(true);
+        };
+
         $("#" + this.$props.id + " .select-all-button").click(() => {
-            this.selectionMode = $("#" + this.$props.id + " .select-shortcut").val();
-            drawSelection(false);
+            this.specialSelection = true;
+            doSpecialSelection();
         });
 
         const PROGRAMS = [1, 33, 0];
@@ -632,9 +650,7 @@ export default {
             drawAxes(MIN_PITCH, maxPitch);
         }
 
-        this.update = (resetSelection=true) => {
-            if (resetSelection)
-                this.selectedArea = null;
+        this.update = () => {
             window.pianorolls[this.other_pianoroll_idx].updateNoteSeq();
             window.pianorolls[this.other_pianoroll_idx].drawNotes();
             this.updateNoteSeq();
@@ -650,111 +666,103 @@ export default {
         this.mask = () => {
             TENSOR_STORE.next(this.active_index);
 
-            doForHorizSelectedNotes((track, svg, note) => {
-                let inSelection = !!this.selectionMode || svg.checkIntersection(note, getSelectionBounds());
-                if (inSelection) {
-                    let index = parseInt(note.getAttribute("data-index"));
-                    let start, end;
-                    if (note.getAttribute('pause')) {
-                        start = parseInt(note.getAttribute('startStep'));
-                        end = parseInt(note.getAttribute('stopStep'));
-                    } else {
-                        start = this.splitUpNotes[PROGRAMS[track]].notes[index].quantizedStartStep;
-                        end = this.splitUpNotes[PROGRAMS[track]].notes[index].quantizedEndStep;
-                    }
-                    for (; start < end; start++)
-                        this.getActiveTensor()[start][track] = this.$props.mask_ids[track];
+            this.selection.forEach(note => {
+                let index = parseInt(note.getAttribute("data-index"));
+                let start, end;
+                if (note.getAttribute('pause')) {
+                    start = parseInt(note.getAttribute('startStep'));
+                    end = parseInt(note.getAttribute('stopStep'));
+                } else {
+                    start = this.splitUpNotes[PROGRAMS[note.track]].notes[index].quantizedStartStep;
+                    end = this.splitUpNotes[PROGRAMS[note.track]].notes[index].quantizedEndStep;
                 }
+                for (; start < end; start++)
+                    this.getActiveTensor()[start][note.track] = this.$props.mask_ids[note.track];
             });
 
             this.update();
         };
 
-        const transpose = (delta) => {
-            TENSOR_STORE.next(this.active_index);
-            let moved = false;
-            doForHorizSelectedNotes((track, svg, note) => {
-                if (track === 2 || note.getAttribute('pause'))
+        const transpose = (delta, makeNext = true) => {
+            if (makeNext)
+                TENSOR_STORE.next(this.active_index);
+            this.selection.forEach(note => {
+                if (note.track === 2 || note.getAttribute('pause'))
                     return;
-                let inSelection = !!this.selectionMode || svg.checkIntersection(note, getSelectionBounds());
-                if (inSelection) {
-                    let index = parseInt(note.getAttribute("data-index"));
-                    let start = this.splitUpNotes[PROGRAMS[track]].notes[index].quantizedStartStep;
-                    let end = this.splitUpNotes[PROGRAMS[track]].notes[index].quantizedEndStep;
+                let index = parseInt(note.getAttribute("data-index"));
+                let start = this.splitUpNotes[PROGRAMS[note.track]].notes[index].quantizedStartStep;
+                let end = this.splitUpNotes[PROGRAMS[note.track]].notes[index].quantizedEndStep;
 
-                    for (; start < end; start++) {
-                        if (2 < this.getActiveTensor()[start][track] &&
-                            this.getActiveTensor()[start][track] < (this.$props.mask_ids[track] - delta)) {
-                            this.getActiveTensor()[start][track] += delta;
-                            moved = true;
-                        }
-
+                for (; start < end; start++) {
+                    if (2 < this.getActiveTensor()[start][note.track] &&
+                        this.getActiveTensor()[start][note.track] < (this.$props.mask_ids[note.track] - delta)) {
+                        this.getActiveTensor()[start][note.track] += delta;
                     }
                 }
             });
 
-            if (this.rectMode === "default" && moved)
-                this.selectionRect.setAttribute("y", parseInt(
-                    this.selectionRect.getAttribute("y")) - delta * this.visualizers[0].config.noteHeight);
-
-
-            this.update(false);
-            drawSelection(true);
         }
 
-        $("#" + this.$props.id + " .transpose-up").click(() => transpose(1));
-        $("#" + this.$props.id + " .transpose-down").click(() => transpose(-1));
+        const applyShiftAction = (dx, dy) => {
+            if(dx)
+                timeShift(dx);
+            if(dy)
+                transpose(dy);
+            this.update();
+            this.selectionRect.setAttribute('x', parseInt((this.selectionRect.getAttribute('x'))) + dx * this.SCALE);
+            this.selectionRect.setAttribute('y', parseInt((this.selectionRect.getAttribute('y'))) + dy * this.visualizers[0].height);
+            doSelection();
+            doSpecialSelection();
+            drawSelection(false);
+        }
 
-        const timeShift = delta => {
-            TENSOR_STORE.next(this.active_index);
-            let moved = false;
+        $("#" + this.$props.id + " .transpose-up").click(() => applyShiftAction(0, 1));
+        $("#" + this.$props.id + " .transpose-down").click(() => applyShiftAction(0, -1));
+        $("#" + this.$props.id + " .shift-left").click(() => applyShiftAction(-16, 0));
+        $("#" + this.$props.id + " .shift-right").click(() => applyShiftAction(16, 0));
+        const timeShift = (delta, makeNext = true) => {
+            if (makeNext)
+                TENSOR_STORE.next(this.active_index);
+            const visitedStarts = new Set();
+            const shiftNote = (note, rev) => {
+                let index = parseInt(note.getAttribute("data-index"));
 
-            let prevTens = TENSOR_STORE.tensors[this.active_index];
-            prevTens = prevTens[prevTens.length - 2];
+                let start, end;
 
-            for (let track = 0; track < 3; track++)
-                for (let i = Math.floor(this.selectionBoundHorizontal.x1 / this.SCALE); i < Math.floor(this.selectionBoundHorizontal.x2 / this.SCALE); i++)
-                    this.getActiveTensor()[i][track] = this.$props.mask_ids[track];
+                if (note.getAttribute('pause')) {
+                    start = parseInt(note.getAttribute('startStep'));
+                    end = parseInt(note.getAttribute('stopStep'));
+                } else {
+                    start = this.splitUpNotes[PROGRAMS[note.track]].notes[index].quantizedStartStep;
+                    end = this.splitUpNotes[PROGRAMS[note.track]].notes[index].quantizedEndStep;
+                }
 
-            doForHorizSelectedNotes((track, svg, note) => {
-                let inSelection = !!this.selectionMode || svg.checkIntersection(note, getSelectionBounds());
-                if (inSelection) {
-                    let index = parseInt(note.getAttribute("data-index"));
+                if (note.track === 2) {
+                    if (visitedStarts.has(start))
+                        return;
+                    visitedStarts.add(start);
+                }
 
-                    let start, end;
+                let d = 1;
+                if (rev) {
+                    [start, end] = [end - 1, start - 1];
+                    d = -1
+                }
 
-                    if (note.getAttribute('pause')) {
-                        start = parseInt(note.getAttribute('startStep'));
-                        end = parseInt(note.getAttribute('stopStep'));
-                    } else {
-                        start = this.splitUpNotes[PROGRAMS[track]].notes[index].quantizedStartStep;
-                        end = this.splitUpNotes[PROGRAMS[track]].notes[index].quantizedEndStep;
-                    }
-
-                    for (; start < end; start++) {
-                        if (start + delta >= 0 && start + delta <= 1024) {
-                            this.getActiveTensor()[start + delta][track] = prevTens[start][track];
-                            moved = true;
-                        }
-
+                for (; start !== end; start += d) {
+                    if (start + delta >= 0 && start + delta < 1024) {
+                        this.getActiveTensor()[start + delta][note.track] = this.getActiveTensor()[start][note.track];
+                        this.getActiveTensor()[start][note.track] = this.$props.mask_ids[note.track];
                     }
                 }
-            });
-
-            if (this.rectMode === "default" && moved) {
-                this.selectionRect.setAttribute("x", parseInt(
-                    this.selectionRect.getAttribute("x")) + delta * this.SCALE);
-                this.selectionBoundHorizontal.x1 += delta * this.SCALE;
-                this.selectionBoundHorizontal.x2 += delta * this.SCALE;
+                this.selection = [];
+                return false;
             }
-
-
-            this.update(false);
-            drawSelection(true);
+            if (delta < 0)
+                this.selection.find(n => shiftNote(n, false));
+            else if (delta > 0)
+                this.selection.findLast(n => shiftNote(n, true));
         };
-
-        $("#" + this.$props.id + " .shift-left").click(() => timeShift(-16));
-        $("#" + this.$props.id + " .shift-right").click(() => timeShift(16));
 
         const activateTab = i => {
             this.active_index = i;
@@ -767,17 +775,13 @@ export default {
 
 
         //executes callback for notes in horizonal selection
-        const doForHorizSelectedNotes = callback => {
+        const doForHorizSelectedNotes = (callback) => {
             this.svgs.each((i, svg) => {
-
-                if (this.selectionMode === 'melody' && i !== 0 || this.selectionMode === 'bass' && i !== 1 || this.selectionMode === 'drums' && i !== 2)
-                    return;
-
                 let children = svg.children;
 
                 let l = 0, h = children.length;
                 let upperX = Infinity;
-                if (!this.selectionMode && this.selectionBoundHorizontal) {
+                if (this.selectionBoundHorizontal) {
                     upperX = this.selectionBoundHorizontal.x2;
                     //search horiz. start of selection binary
                     while (h - l > 1) {
@@ -825,17 +829,19 @@ export default {
             }
 
             doForHorizSelectedNotes((track, svg, note) => {
-                let inSelection = !!this.selectionMode || svg.checkIntersection(note, getSelectionBounds());
+                let inSelection = svg.checkIntersection(note, getSelectionBounds());
                 let fill = note.getAttribute('pause') ? 'transparent' : 'rgb(' + NOTE_RGB[track] + ')';
                 note.setAttribute('fill', (inSelection ? 'rgb(' + ACTIVE_NOTE_RGB + ')' : fill));
             });
+            this.selection.forEach(note => note.setAttribute('fill', 'rgb(' + ACTIVE_NOTE_RGB + ')'));
         };
 
 
         this.drawNotes();
 
         this.axes.addEventListener('click', async e => {
-            if (this.selectedArea && (this.selectedArea.w ** 2 > 9 && this.selectedArea.h ** 2 > 9)) {
+            let bounds = getSelectionBounds();
+            if (bounds.height * bounds.width > 9) {
                 return;
             }
             this.playerSeconds = (e.offsetX - AXES_PAD) * 128 / 4096;
@@ -848,7 +854,6 @@ export default {
         });
 
         this.origin = null;
-        this.selectedArea = null;
 
         this.selectionRect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
         this.selectionRect.setAttribute('x', 0);
@@ -857,31 +862,89 @@ export default {
         this.selectionRect.setAttribute('height', 0);
         this.selectionRect.setAttribute('fill', 'transparent');
         this.selectionRect.setAttribute('stroke', 'black');
+        this.selectionRect.classList.add('selection-rect');
 
+        this.mouseMoveMode = "draw";
         this.axes.addEventListener('mousedown', async e => {
             this.origin = {x: e.offsetX, y: e.offsetY};
-            if (this.selectionBoundHorizontal)
-                drawSelection(e);
-            this.selectionBoundHorizontal = {x1: e.offsetX, x2: e.offsetX};
+            let bounds = this.selectionRect.getBBox();
+            if (e.offsetX > bounds.x && e.offsetX < bounds.x + bounds.width &&
+                e.offsetY > bounds.y && e.offsetY < bounds.y + bounds.height) {
+                this.mouseMoveMode = "move";
+            }
+            else {
+                this.mouseMoveMode = "draw";
+                this.selection = [];
+                doSelection();
+                this.specialSelection = false;
+                if (this.selectionBoundHorizontal)
+                    drawSelection(e);
+                this.selectionBoundHorizontal = {x1: e.offsetX, x2: e.offsetX};
+                this.selectionRect.sx = parseInt(this.selectionRect.getAttribute('x'));
+                this.selectionRect.sy = parseInt(this.selectionRect.getAttribute('y'));
+            }
         });
+        this.selectionBoundHorizontal = {x1: 0, x2: 0};
+
+        this.selection = [];
+        const doSelection = () => {
+
+            this.selection.forEach(note => {
+                let fill = note.getAttribute('pause') ? 'transparent' : 'rgb(' + NOTE_RGB[note.track] + ')';
+                note.setAttribute('fill', fill);
+            });
+            this.selection = [];
+            doForHorizSelectedNotes((track, svg, note) => {
+                if (svg.checkIntersection(note, getSelectionBounds())) {
+                    addToCurrentSelection(note, track);
+                }
+            });
+        };
+
         this.axes.addEventListener('mouseup', () => {
             this.origin = null;
+
+            if (this.mouseMoveMode === "move") {
+                transpose(this.dy, true);
+                timeShift(this.dx, false);
+                if (this.rectMode === "default") {
+                    this.selectionBoundHorizontal.x1 += this.dx * this.SCALE;
+                    this.selectionBoundHorizontal.x1 = Math.max(this.selectionBoundHorizontal.x1, 0);
+                    this.selectionBoundHorizontal.x2 += this.dx * this.SCALE;
+                }
+                this.update();
+                doSpecialSelection();
+
+            }
+            doSelection();
+            drawSelection(true);
+            this.dx = 0;
+            this.dy = 0;
+            this.selectionRect.sx = parseInt(this.selectionRect.getAttribute('x'));
+            this.selectionRect.sy = parseInt(this.selectionRect.getAttribute('y'));
         });
         this.axes.addEventListener('mousemove', e => {
             if (this.origin) {
-                if (this.selectionMode) {
-                    this.selectionMode = false;
-                    this.drawNotes();
-                }
+                if (this.mouseMoveMode === "draw") {
 
-                this.axes.append(this.selectionRect);
-                this.selectedArea = {
-                    x: Math.min(this.origin.x, e.offsetX) - AXES_PAD, y: Math.min(this.origin.y, e.offsetY),
-                    w: Math.abs(e.offsetX - this.origin.x) + AXES_PAD, h: Math.abs(e.offsetY - this.origin.y)
-                };
-                this.selectionBoundHorizontal.x1 = Math.min(this.selectionBoundHorizontal.x1, this.selectedArea.x);
-                this.selectionBoundHorizontal.x2 = Math.max(this.selectionBoundHorizontal.x2, this.selectedArea.x + this.selectedArea.w);
-                drawSelection(e);
+                    this.axes.append(this.selectionRect);
+                    this.selectionBoundHorizontal.x1 = Math.min(this.selectionBoundHorizontal.x1, Math.min(this.origin.x, e.offsetX) - AXES_PAD);
+                    this.selectionBoundHorizontal.x2 = Math.max(this.selectionBoundHorizontal.x2, this.selectionBoundHorizontal.x1 + Math.abs(e.offsetX - this.origin.x) + AXES_PAD);
+                    drawSelection(e);
+                } else {
+                    this.dy = Math.floor((this.origin.y - e.offsetY) / this.visualizers[0].config.noteHeight);
+                    this.dx = Math.floor((e.offsetX - this.origin.x) / this.SCALE);
+
+                    const shiftSvgElm = (el, track= 0) => {
+                        el.setAttribute('x', el.sx + this.dx * this.SCALE);
+                        if (track < 2)
+                            el.setAttribute('y', el.sy - this.dy * this.visualizers[0].config.noteHeight);
+                    }
+                    this.selection.forEach(note => {
+                        shiftSvgElm(note, note.track);
+                        shiftSvgElm(this.selectionRect);
+                    });
+                }
             }
         });
         this.last_updated = 0;

@@ -124,19 +124,15 @@
         border: solid black;
         float: right;
     }
+    rect.selection-rect {
+        cursor: move;
+    }
 </style>
 <script src="/utils/frontend/jquery-3.7.0.min.js"></script>
 <script src="/utils/frontend/music@^1.23.1.js"></script>
-<!-- todo: make available offline foll 2 lines-->
 <link rel="stylesheet" href="https://code.jquery.com/ui/1.13.2/themes/base/jquery-ui.css">
 <script src="https://code.jquery.com/ui/1.13.2/jquery-ui.js"></script>
 <script>
-    /*function arrayEquals(a, b) {
-        return Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((val, index) => {
-            if (Array.isArray(val))
-                return arrayEquals(val, b[index]);
-            return val === b[index]});
-      }*/
 
     function copy(x) {
         return JSON.parse(JSON.stringify(x));
@@ -166,6 +162,10 @@
         next(i, empty=false) {
             const n = empty? this.initMaskTensor() : copy(this.tensors[i][this.tensors[i].length - 1]);
             this.tensors[i].push(n);
+        }
+
+        reset(i) {
+            this.tensors[i][this.tensors[i].length - 1] = copy(this.tensors[i][this.tensors[i].length - 2]);
         }
         getActive(i) {
             return this.tensors[i][this.tensors[i].length - 1];

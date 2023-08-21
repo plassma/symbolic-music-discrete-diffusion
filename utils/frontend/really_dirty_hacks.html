@@ -64,7 +64,7 @@
                                             tutIdx += 1;
                                             $("#regen").dialog("close");
                                             $('.direction-button').removeClass('tut-high');
-                                            $('#fin1').dialog({width: 500, height: 400});
+                                            $('#fin1').dialog({width: 500, height: 500});
                                             $('.next-button').click(() => {
                                                 $('#fin1').dialog('close');
                                                 $('#upload').dialog();
@@ -162,6 +162,7 @@
             dropdown., click Select button).
             Finally, you can transpose your current selection with the arrow up/down buttons, and shift it
             backwards/forward in time with the left/right buttons.
+            You can also move the notes you selected with drag and drop.
         </p>
         <a href="#" class="next-button" title="next">
             Next
@@ -171,7 +172,9 @@
         <p>One last feature we did not yet mention: you can upload and extend your own MIDI files!
             If you don't have one at hand right now, you can use <a
                     style="cursor: pointer; color: blue; text-decoration: underline;"
-                    href="/utils/frontend/mario_original.mid">this one</a> in the meantime.
+                    href="/utils/frontend/mario_original.mid">this one (mario)</a> or <a
+                    style="cursor: pointer; color: blue; text-decoration: underline;"
+                    href="/utils/frontend/imperial_mono.mid">this one (imperial)</a> in the meantime (best download them both now).
             Just use the <span class="tut-high">upload button</span>.
             If you do now want to overwrite your pieces, choose an empty slot in the left pianoroll tab control.
         </p>
